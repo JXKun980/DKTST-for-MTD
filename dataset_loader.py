@@ -4,6 +4,16 @@ import tqdm
 import pandas as pd
 import re
 
+# LLMs to choose from
+# ChatGPT
+# BloomZ
+# ChatGLM
+# Dolly
+# ChatGPT-turbo
+# GPT4
+# StableLM
+
+
 # you can add more datasets here and write your own dataset parsing function
 DATASETS = ['TruthfulQA', 'SQuAD1', 'NarrativeQA']
 
