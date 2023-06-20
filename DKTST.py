@@ -128,7 +128,7 @@ class DKTST:
         best_power = 0
         best_checkpoint = 0
         self.latent.train()
-        for t in tqdm(range(continue_epoch, n_epoch), desc="Training Progress"): # Epoch Loop
+        for t in tqdm(range(continue_epoch, n_epoch+1), desc="Training Progress"): # Epoch Loop, +1 here to end at a whole numbered epoch
             J_stars_batch = np.zeros([batch_cnt])
             mmd_values_batch = np.zeros([batch_cnt])
             mmd_stds_batch = np.zeros([batch_cnt])
