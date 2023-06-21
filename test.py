@@ -13,7 +13,7 @@ import re
 import dataset_loader as dataset_loader
 from DKTST import DKTST
 
-def test(chkpnt_dir, chkpnt_name, dataset_name, dataset_LLM, test_set_only, s1_type, s2_type, 
+def dktst_test(chkpnt_dir, chkpnt_name, dataset_name, dataset_LLM, use_whole_set, s1_type, s2_type, 
          shuffle, perm_cnt, sig_lvl, batch_size, seed, device, dtype, logger):
     # Input validation
     assert s1_type in ['human', 'machine'] and s2_type in ['human', 'machine'], "S1 and S2 type must be one of: human, machine."
@@ -21,7 +21,7 @@ def test(chkpnt_dir, chkpnt_name, dataset_name, dataset_LLM, test_set_only, s1_t
     # Global variable
     chkpnt_path = f'{chkpnt_dir}/{chkpnt_name}'
     
-    logger.info("\n============ Testing Starts ============\n")
+    logger.info("=========== Testing Starts ============\n")
     
     # Setup seeds
     np.random.seed(seed)
@@ -33,48 +33,48 @@ def test(chkpnt_dir, chkpnt_name, dataset_name, dataset_LLM, test_set_only, s1_t
     logger.info(f'Loading dataset {dataset_name}...')
     data = dataset_loader.load(name=dataset_name, detectLLM=dataset_LLM)
     assert len(data['train']['text']) % 2 == 0 and len(data['test']['text']) % 2 == 0, "Dataset must contain pairs of human and machine answers, i.e. {Human, Machine, Human...}"
-    data_train_human = data['train']['text'][0::2]
-    data_train_machine = data['train']['text'][1::2]
-    data_test_human = data['test']['text'][0::2]
-    data_test_machine = data['test']['text'][1::2]
+    data_human_tr = data['train']['text'][0::2]
+    data_machine_tr = data['train']['text'][1::2]
+    data_human_te = data['test']['text'][0::2]
+    data_machine_te = data['test']['text'][1::2]
     
     # Choose to use whole set or only the test set
-    if not test_set_only:
-        data_test_human = data_train_human + data_test_human
-        data_test_machine = data_train_machine + data_test_machine
+    if use_whole_set:
+        data_human_te = data_human_tr + data_human_te
+        data_machine_te = data_machine_tr + data_machine_te
     
     # Random shuffle the dataset so each pair of answers do not correspond to the same questions
     if shuffle:
-        random.shuffle(data_test_human)
-        random.shuffle(data_test_machine)
+        random.shuffle(data_human_te)
+        random.shuffle(data_machine_te)
         
     # Allocate data to S1 and S2    
     if s1_type == 'human':
-        data_test_s1 = data_test_human
+        data_s1_te = data_human_te
     elif s1_type == 'machine':
-        data_test_s1 = data_test_machine
+        data_s1_te = data_machine_te
     else:
         raise ValueError("Sample data type not recognized")
     
     if s2_type == 'human':
-        data_test_s2 = data_test_human
+        data_s2_te = data_human_te
     elif s2_type == 'machine':
-        data_test_s2 = data_test_machine
+        data_s2_te = data_machine_te
     else:
         raise ValueError("Sample data type not recognized")
 
     # If two sets use the same type, use half of the data of that type for each set so they are disjoint
     if s1_type == s2_type:
-        s = len(data_test_s1)//2
-        data_test_s1 = data_test_s1[:s]
-        data_test_s2 = data_test_s2[s:s*2]
+        s = len(data_s1_te)//2
+        data_s1_te = data_s1_te[:s]
+        data_s2_te = data_s2_te[s:s*2]
 
     # Set up DK-TST
     hidden_multi = int(chkpnt_name.split('_')[3])
     dktst = DKTST(
+        latent_size_multi=hidden_multi,
         device=device,
         dtype=dtype,
-        latent_size_multi=hidden_multi,
         logger=logger
     )
     
@@ -82,30 +82,32 @@ def test(chkpnt_dir, chkpnt_name, dataset_name, dataset_LLM, test_set_only, s1_t
     chkpnt_epoch = int(chkpnt_name.split('_')[4])
     dktst.load(f'{chkpnt_path}/model_ep_{chkpnt_epoch}.pth')
     test_power, threshold_avg, mmd_avg = dktst.test(
-        s1=data_test_s1,
-        s2=data_test_s2,
+        s1=data_s1_te,
+        s2=data_s2_te,
         batch_size=batch_size,
         perm_cnt=perm_cnt,
-        sig_level=sig_lvl,
+        sig_lvl=sig_lvl,
         seed=seed
     )
     
     # Basic logging of testing parameters
     logger.info(
         f"Testing with parameters: \n"
-        f"  dataset={dataset_name}\n"
-        f"  s1 type={s1_type}\n"
-        f"  s2 type={s2_type}\n"
-        f"  shuffle={shuffle}\n"
-        f"  hidden size multiplier={hidden_multi}\n"
-        f"  permutatiaon count={perm_cnt}\n"
-        f"  significance level={sig_lvl}\n"
-        f"  testing batch size={batch_size}\n"
-        f"  args.device={device}\n"
-        f"  seed={seed}\n"
-        f"  checkpoint dir={chkpnt_dir}\n"
-        f"  model name={chkpnt_name}\n"
-        f"  testing epoch={chkpnt_epoch}")
+        f"  Checkpoint dir={chkpnt_dir}\n"
+        f"  Checkpoint name={chkpnt_name}\n"
+        f"  Checkpoint epoch={chkpnt_epoch}"
+        f"  Dataset={dataset_name}\n"
+        f"  Dataset LLM={dataset_LLM}\n"
+        f"  Use whole set={use_whole_set}\n"
+        f"  S1 type={s1_type}\n"
+        f"  S2 type={s2_type}\n"
+        f"  Shuffle={shuffle}\n"
+        f"  Permutatiaon count={perm_cnt}\n"
+        f"  Significance level={sig_lvl}\n"
+        f"  Testing batch size={batch_size}\n"
+        f"  Seed={seed}\n"
+        f"  Device={device}\n"
+        )
     
     # Start testing
     logger.info(
@@ -127,7 +129,7 @@ if __name__ == "__main__":
     # test parameters
     parser.add_argument('--dataset', '-d', type=str, default='SQuAD1') # TruthfulQA, SQuAD1, NarrativeQA
     parser.add_argument('--dataset_LLM', '-dl', type=str, default='ChatGPT') # ChatGPT, BloomZ, ChatGLM, Dolly, ChatGPT-turbo, GPT4, StableLM
-    parser.add_argument('--test_set_only', default=False, action='store_true') # Whether to use the whole set or only the split test set as the data source
+    parser.add_argument('--use_whole_set', default=False, action='store_true') # Whether to use the whole set or only the split test set as the data source
     parser.add_argument('--s1_type', type=str, default='human') # Type of data (human or machine) for the first sample set
     parser.add_argument('--s2_type', type=str, default='machine') # Type of data (human or machine) for the second sample set
     parser.add_argument('--shuffle', default=False, action='store_true') # Shuffle make sure each pair of answers do not correspond to the same questions
@@ -150,14 +152,14 @@ if __name__ == "__main__":
     # Setup test parameters
     DATASET = args.dataset
     DATASET_LLM = args.dataset_LLM
-    TEST_SET_ONLY = args.test_set_only
+    USE_WHOLE_SET = args.use_whole_set
     S1_TYPE = args.s1_type
     S2_TYPE = args.s2_type
-    SHUFFLE_TEST = args.shuffle
+    SHUFFLE_TE = args.shuffle
     PERM_CNT = args.perm_count # Amount of permutation during two sample test
-    SIG_LEVEL = args.sig_level
-    BATCH_SIZE_TEST = args.batch_size
-    SEED_TEST = args.seed
+    SIG_LVL = args.sig_level
+    BATCH_SIZE_TE = args.batch_size
+    SEED_TE = args.seed
     # Set up other parameters
     auto_device = 'cuda' if torch.cuda.is_available() else 'cpu'
     DEVICE = auto_device if args.device == 'auto' else args.device
@@ -176,6 +178,12 @@ if __name__ == "__main__":
             logging.StreamHandler()])
     logger = logging.getLogger('test_logger') # Unique per training
     
+    # Setup seeds
+    np.random.seed(SEED_TE)
+    torch.manual_seed(SEED_TE)
+    torch.cuda.manual_seed(SEED_TE)
+    torch.backends.cudnn.deterministic = True
+    
     if args.custom_test:
         results = []
         
@@ -184,14 +192,14 @@ if __name__ == "__main__":
         dataset_tr_list = ['SQuAD1']
         dataset_llm_tr_list = ['ChatGPT']
         s1s2_tr_list = ['hm']
-        shuffle_tr_list = [True] # [True, False]
-        linear_size_list = [3] # [3, 5]
+        shuffle_tr_list = [True, False]
+        linear_size_list = [3, 5]
         epoch_list = [4000]
         batch_size_tr_list = [2000]
         seed_tr_list = [1102]
         
         # Testing parameters
-        dataset_te_list = ['SQuAD1']
+        dataset_te_list = ['TruthfulQA']
         dataset_llm_te_list = ['ChatGPT']
         s1s2_te_list = ['hm', 'hh', 'mm']
         shuffle_te_list = [True, False]
@@ -199,6 +207,8 @@ if __name__ == "__main__":
         sig_lvl_list = [0.05]
         perm_cnt_list = [200]
         seed_te_list = [1102]
+        
+        use_whole_set = True
         
         # Iterate through model parameters
         chkpnts = listdir(CHKPNT_DIR)
@@ -228,8 +238,8 @@ if __name__ == "__main__":
                 s1 = str2type(s1s2_te[0])
                 s2 = str2type(s1s2_te[1])
 
-                test_power, threshold_avg, mmd_avg = test(CHKPNT_DIR, chkpnt_name, data_te, data_llm_te, 
-                                                          TEST_SET_ONLY, s1, s2, shuffle_te, perm_cnt,
+                test_power, threshold_avg, mmd_avg = dktst_test(CHKPNT_DIR, chkpnt_name, data_te, data_llm_te, 
+                                                          use_whole_set, s1, s2, shuffle_te, perm_cnt,
                                                           sig_lvl, batch_size_te, seed_te, DEVICE, DTYPE, logger)
                 results.append({
                     'Train - Checkpoint Name': chkpnt_name,
@@ -257,9 +267,9 @@ if __name__ == "__main__":
         results_df.to_csv(f'./test_logs/test_{start_time_str}.csv')
         
     else:
-        test_power, threshold_avg, mmd_avg = test(CHKPNT_DIR, CHKPNT_NAME, CHKPNT_EPOCH, 
-                                                  DATASET, DATASET_LLM, TEST_SET_ONLY, S1_TYPE, S2_TYPE, 
-                                                  SHUFFLE_TEST, PERM_CNT, SIG_LEVEL, BATCH_SIZE_TEST, SEED_TEST,
+        test_power, threshold_avg, mmd_avg = dktst_test(CHKPNT_DIR, CHKPNT_NAME, CHKPNT_EPOCH, 
+                                                  DATASET, DATASET_LLM, USE_WHOLE_SET, S1_TYPE, S2_TYPE, 
+                                                  SHUFFLE_TE, PERM_CNT, SIG_LVL, BATCH_SIZE_TE, SEED_TE,
                                                   DEVICE, DTYPE, logger)
                     
                     
