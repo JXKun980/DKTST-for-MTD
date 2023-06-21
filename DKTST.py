@@ -76,7 +76,8 @@ class DKTST:
         print(self.epsilonOPT.item())
         
         # Deep Neural Network
-        self.latent = self.ModelLatentF(self.latent_in_dim, self.latent_H_dim, self.latent_out_dim).to(self.device)
+        self.latent = self.ModelLatentF(self.latent_in_dim, self.latent_H_dim, 
+                                        self.latent_out_dim).to(self.device)
         
     def get_parameters_list(self):
         return list(self.latent.parameters()) + [self.epsilonOPT] + [self.sigmaOPT] + [self.sigma0OPT]
@@ -92,7 +93,9 @@ class DKTST:
             batch_data_cls = batch_data_encoded.last_hidden_state[:,0,:] # First token embedding for each sample is the CLS output
         return batch_data_cls
         
-    def train_and_test(self, s1_tr, s1_te, s2_tr, s2_te, lr, n_epoch, batch_size_tr, batch_size_te, save_folder, perm_cnt, sig_level, continue_epoch=0, eval_inteval=100, seed=1102):
+    def train_and_test(self, s1_tr, s1_te, s2_tr, s2_te, lr, n_epoch, batch_size_tr, 
+                       batch_size_te, save_folder, perm_cnt, sig_lvl, continue_epoch=0, 
+                       use_custom_test=True, eval_inteval=100, seed=1102):
         self.logger.debug("Start training...")
         
         # Input validation
@@ -171,7 +174,8 @@ class DKTST:
             J_star_epoch = np.average(J_stars_batch)
             mmd_value_epoch = np.average(mmd_values_batch)
             mmd_std_epoch = np.average(mmd_stds_batch)
-            train_power, train_threshold, train_mmd = self.test(s1=s1_tr, s2=s2_tr, batch_size=batch_size_tr, perm_cnt=perm_cnt, sig_level=sig_level) # Training accuracy
+            train_power, train_threshold, train_mmd = self.test(s1=s1_tr, s2=s2_tr, batch_size=batch_size_tr, 
+                                                                perm_cnt=perm_cnt, sig_lvl=sig_lvl) # Training accuracy
             
             # Record epoch stats
             J_stars_epoch[t] = J_star_epoch
@@ -199,7 +203,10 @@ class DKTST:
                 self.logger.info("Validating model...")
                 
                 # Custom test consists of both type 1 and 2 error test, for different batch sizes
-                val_power_avg = self.custom_test_procedure(s1_te, s2_te, perm_cnt, sig_level, writer, t)
+                if use_custom_test:
+                    val_power_avg = self.custom_test_procedure(s1_te, s2_te, perm_cnt, sig_lvl, writer, t)
+                else:
+                    val_power_avg = self.test(s1_te, s2_te, batch_size_te, perm_cnt, sig_lvl, seed)
                 
                 # Update best model
                 if val_power_avg >= best_power:
@@ -225,7 +232,7 @@ class DKTST:
     def load(self, model_path):
         self.latent.load_state_dict(torch.load(model_path))
         
-    def test(self, s1, s2, batch_size, perm_cnt, sig_level, seed=1102):
+    def test(self, s1, s2, batch_size, perm_cnt, sig_lvl, seed=1102):
         self.logger.debug("Start testing...")
         self.latent.eval()
         
@@ -271,7 +278,7 @@ class DKTST:
                 sigma, 
                 sigma0_u, 
                 ep, 
-                sig_level, 
+                sig_lvl, 
                 self.device, 
                 self.dtype)
 
@@ -289,14 +296,14 @@ class DKTST:
         self.latent.train()
         return test_power, threshold_avg, mmd_avg
     
-    def custom_test_procedure(self, s1, s2, perm_cnt, sig_level, writer=None, epoch=None):
+    def custom_test_procedure(self, s1, s2, perm_cnt, sig_lvl, writer=None, epoch=None):
         batch_sizes = [10, 5, 4, 3]
         val_power_diff_sum = 0
         for bs in batch_sizes: # Test for all these batch sizes for testing
             # Test of Type II error (Assuming s1 and s2 are different distributions)
-            val_power1, val_threshold1, val_mmd1 = self.test(s1=s1, s2=s2, batch_size=bs, perm_cnt=perm_cnt, sig_level=sig_level) 
+            val_power1, val_threshold1, val_mmd1 = self.test(s1=s1, s2=s2, batch_size=bs, perm_cnt=perm_cnt, sig_lvl=sig_lvl) 
             # Test of Type I error (Assuming s1 and s2 are different distributions)
-            val_power2, val_threshold2, val_mmd2 = self.test(s1=s1, s2=s1, batch_size=bs, perm_cnt=perm_cnt, sig_level=sig_level) 
+            val_power2, val_threshold2, val_mmd2 = self.test(s1=s1, s2=s1, batch_size=bs, perm_cnt=perm_cnt, sig_lvl=sig_lvl) 
             
             val_power_diff_sum += val_power1
             
