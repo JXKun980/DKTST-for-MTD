@@ -11,75 +11,43 @@ import torch
 import dataset_loader as dataset_loader
 from DKTST import DKTST
 
-if __name__ == "__main__":
+def get_args():
     # Setup parser
     parser = ArgumentParser()
     # checkpoint parameters
-    parser.add_argument('--checkpoint_dir', type=str, default='./checkpoints')
-    parser.add_argument('--continue_checkpoint', type=str, default=None)
-    parser.add_argument('--n_epoch', '-e', type=int, default=1000)
-    parser.add_argument('--hidden_multi', type=int, default=3) # Hidden dim = In dim * Multiplier
+    parser.add_argument('--chkpnt_dir', type=str, default='./checkpoints')
+    parser.add_argument('--continue_chkpnt', type=str, default=None)
+    parser.add_argument('--n_epoch', '-e', type=int, default=8000)
+    parser.add_argument('--hidden_multi', type=int, default=5) # Hidden dim = In dim * Multiplier
     # training parameters
     parser.add_argument('--dataset', '-d', type=str, default='SQuAD1') # TruthfulQA, SQuAD1, NarrativeQA
     parser.add_argument('--dataset_LLM', '-dl', type=str, default='ChatGPT') # ChatGPT, BloomZ, ChatGLM, Dolly, ChatGPT-turbo, GPT4, StableLM
     parser.add_argument('--s1_type', type=str, default='human') # Type of data (human or machine) for the first sample set
     parser.add_argument('--s2_type', type=str, default='machine') # Type of data (human or machine) for the second sample set
     parser.add_argument('--shuffle', default=False, action='store_true') # Shuffle make sure each pair of answers do not correspond to the same questions
-    parser.add_argument('--learning_rate', '-lr', type=float, default=0.00005)
+    parser.add_argument('--learning_rate', '-lr', type=float, default=0.001)
     parser.add_argument('--batch_size_train', '-btr', type=int, default=2000)
-    parser.add_argument('--seed', '-s', type=int, default=1102) # dimension of samples (default value is 10)
+    parser.add_argument('--eval_interval', type=int, default=100) # Evaluation interval
+    parser.add_argument('--seed', '-s', type=int, default=1102)
     # validation parameters
-    parser.add_argument('--perm_count', '-pc', type=int, default=200)
-    parser.add_argument('--sig_level', '-a', type=float, default=0.05)
-    parser.add_argument('--batch_size_test', '-bte', type=int, default=200) # Not used if custom validation procedure is used
+    parser.add_argument('--perm_cnt', '-pc', type=int, default=200)
+    parser.add_argument('--sig_lvl', '-a', type=float, default=0.05)
+    parser.add_argument('--batch_size_test', '-bte', type=int, default=20) # Not used if custom validation procedure is used
     parser.add_argument('--use_custom_test', default=False, action='store_true') # Custom validation that test for a range of batch sizes etc.
     # other parameters
     parser.add_argument('--device', '-dv', type=str, default='auto')
     parser.add_argument('--debug', default=False, action='store_true')
-    
     args = parser.parse_args()
     
-    # Setup parameters
-    CHKPNT_DIR = args.checkpoint_dir
-    CONT_CHKPNT = args.continue_checkpoint
-    N_EPOCH = args.n_epoch # number of training epochs
-    HIDDEN_MULTI = args.hidden_multi
-    
-    DATASET = args.dataset
-    DATASET_LLM = args.dataset_LLM
-    S1_TYPE = args.s1_type
-    S2_TYPE = args.s2_type
-    SHUFFLE = args.shuffle
-    LR = args.learning_rate # default learning rate for MMD-D on HDGM
-    BATCH_SIZE_TR = args.batch_size_train
-    SEED = args.seed
-    
-    PERM_CNT = args.perm_count # Amount of permutation during two sample test
-    SIG_LVL = args.sig_level
-    BATCH_SIZE_TE = args.batch_size_test
-    USE_CUSTOM_TEST = args.use_custom_test
-    
+    # derived parameters
     auto_device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    DEVICE = auto_device if args.device == 'auto' else args.device
-    DEBUG = args.debug
-    DTYPE = torch.float
+    args.device = auto_device if args.device == 'auto' else args.device
+    # added parameters
+    args.dtype = torch.float
+    return args
 
-    # Input validation
-    assert S1_TYPE in ['human', 'machine'] and S1_TYPE in ['human', 'machine'], "S1 and S2 type must be one of: human, machine."
-        
-    # Model directory, unique per run
-    if CONT_CHKPNT:
-        CHKPNT_PATH = f'{CHKPNT_DIR}/{CONT_CHKPNT}'
-    else:
-        start_time_str = datetime.now().strftime("%Y%m%d%H%M%S")
-        shuffle_str = 's' if SHUFFLE else 'nos'
-        CHKPNT_PATH = f'{CHKPNT_DIR}/{DATASET}_{S1_TYPE[0]}{S2_TYPE[0]}_{shuffle_str}_{HIDDEN_MULTI}_{N_EPOCH}_{BATCH_SIZE_TR}_{SEED}_{start_time_str}'
-        if not os.path.exists(CHKPNT_PATH):
-            os.makedirs(CHKPNT_PATH)
-    
-    # Setup logs
-    log_level = logging.DEBUG if DEBUG else logging.INFO
-    logging_path = f'{CHKPNT_PATH}/training.log'
+def setup_logs():
+    log_level = logging.DEBUG if ARGS.debug else logging.INFO
     logging.basicConfig(
         format='%(asctime)s %(message)s',
         level=log_level, 
@@ -87,52 +55,69 @@ if __name__ == "__main__":
         handlers=[
             logging.FileHandler(f'{CHKPNT_PATH}/training.log', mode='a'),
             logging.StreamHandler()])
-    logger = logging.getLogger(CHKPNT_PATH) # Unique per training
-    
-    logger.info("============ Training Starts ============\n")
+    return logging.getLogger(CHKPNT_PATH) # Unique per training
 
-    # Setup seeds
-    np.random.seed(SEED)
-    torch.manual_seed(SEED)
-    torch.cuda.manual_seed(SEED)
+def get_and_create_chkpnt_path():
+    if ARGS.continue_chkpnt:
+        chkpnt_path = os.path.join(ARGS.chkpnt_dir, ARGS.continue_chkpnt)
+    else:
+        shuffle_str = 's' if ARGS.shuffle else 'nos'
+        chkpnt_path = (
+            f'{ARGS.chkpnt_dir}/{ARGS.dataset}_{ARGS.s1_type[0]}{ARGS.s2_type[0]}'
+            f'_{shuffle_str}_{ARGS.hidden_multi}_{ARGS.n_epoch}_{ARGS.batch_size_train}_{ARGS.seed}_{START_TIME_STR}')
+        if not os.path.exists(chkpnt_path):
+            os.makedirs(chkpnt_path)
+    return chkpnt_path
+
+def setup_seeds():
+    np.random.seed(ARGS.seed)
+    torch.manual_seed(ARGS.seed)
+    torch.cuda.manual_seed(ARGS.seed)
     torch.backends.cudnn.deterministic = True
 
+def perform_training():
+    # Input validation
+    assert ARGS.s1_type in ['human', 'machine'] and ARGS.s2_type in ['human', 'machine'], "S1 and S2 type must be one of: human, machine."
+    
+    setup_seeds()
+    LOGGER.info("============ Training Starts ============\n")
+
     # Set up dataset
-    logger.info(f'Loading dataset {DATASET}...')
-    data = dataset_loader.load(name=DATASET, detectLLM=DATASET_LLM)
+    LOGGER.info(f'Loading dataset {ARGS.dataset}...')
+    data = dataset_loader.load(name=ARGS.dataset, detectLLM=ARGS.dataset_LLM)
     assert len(data) % 2 == 0, "Dataset must contain pairs of human and machine answers, i.e. {Human, Machine, Human...}"
     data_human_tr = data['train']['text'][0::2]
     data_machine_tr = data['train']['text'][1::2]
     data_human_te = data['test']['text'][0::2]
     data_machine_te = data['test']['text'][1::2]
     # Random shuffle the dataset so each pair of answers do not correspond to the same questions
-    if SHUFFLE:
+    if ARGS.shuffle:
         random.shuffle(data_human_tr)
         random.shuffle(data_machine_tr)
         random.shuffle(data_human_te)
         random.shuffle(data_machine_te)
     
     # Allocate data to S1 and S2
-    if S1_TYPE == 'human':
+    if ARGS.s1_type == 'human':
         data_s1_tr = data_human_tr
         data_s1_te = data_human_te
-    elif S1_TYPE == 'machine':
+    elif ARGS.s1_type == 'machine':
         data_s1_tr = data_machine_tr
         data_s1_te = data_machine_te
     else:
         raise ValueError("Sample data type not recognized")
     
-    if S2_TYPE == 'human':
+    if ARGS.s2_type == 'human':
         data_s2_tr = data_human_tr
         data_s2_te = data_human_te
-    elif S2_TYPE == 'machine':
+    elif ARGS.s2_type == 'machine':
         data_s2_tr = data_machine_tr
         data_s2_te = data_machine_te
     else:
         raise ValueError("Sample data type not recognized")
 
     # If two sets use the same type, use half of the data of that type for each set so they are disjoint
-    if S1_TYPE == S2_TYPE:
+    if ARGS.s1_type == ARGS.s2_type:
         s = len(data_s1_tr)//2
         data_s1_tr = data_s1_tr[:s]
         data_s2_tr = data_s2_tr[s:s*2]
@@ -142,15 +127,15 @@ if __name__ == "__main__":
 
     # Set up DK-TST
     dktst = DKTST(
-        latent_size_multi=HIDDEN_MULTI,
-        device=DEVICE,
-        dtype=DTYPE,
-        logger=logger
+        latent_size_multi=ARGS.hidden_multi,
+        device=ARGS.device,
+        dtype=ARGS.dtype,
+        logger=LOGGER
     )
     
     # Load correct checkpoint for continue training
-    CONTINUE_EPOCH = 0
-    if CONT_CHKPNT:
+    cont_epoch = 0
+    if ARGS.continue_chkpnt:
         chkpnt_epoch_max = 0
         chkpnt_names = os.listdir(CHKPNT_PATH)
         for n in chkpnt_names:
@@ -162,45 +147,62 @@ if __name__ == "__main__":
             raise Exception('Could not find a valid checkpoint to continue')
         else:
             dktst.load(f"{CHKPNT_PATH}/model_ep_{chkpnt_epoch_max}.pth")
-            CONTINUE_EPOCH = chkpnt_epoch_max + 1
-            logger.info(f"Continue training from epoch {CONTINUE_EPOCH} for model {CONT_CHKPNT}")
+            cont_epoch = chkpnt_epoch_max + 1
+            LOGGER.info(f"Continue training from epoch {cont_epoch} for model {ARGS.continue_chkpnt}")
     
     # Basic logging of training parameters
-    logger.info(
+    LOGGER.info(
         f"Training with parameters: \n"
-        f"  Checkpoint path={CHKPNT_PATH}\n"
-        f"  Continue checkpoint name={CONT_CHKPNT}\n"
-        f"  Epoch count={N_EPOCH}\n"
-        f"  Hidden size multiplier={HIDDEN_MULTI}\n"
-        f"  Dataset={DATASET}\n"
-        f"  Dataset LLM={DATASET_LLM}\n"
-        f"  S1 type={S1_TYPE}\n"
-        f"  S2 type={S2_TYPE}\n"
-        f"  Shuffle={SHUFFLE}\n"
-        f"  Learning rate={LR}\n"
-        f"  Training batch size={BATCH_SIZE_TR}\n"
-        f"  Permutatiaon count={PERM_CNT}\n"
-        f"  Significance level={SIG_LVL}\n"
-        f"  Testing batch size={'In Code' if USE_CUSTOM_TEST else BATCH_SIZE_TE}\n"
-        f"  Use custom test={USE_CUSTOM_TEST}\n"
-        f"  args.device={DEVICE}\n"
-        f"  seed={SEED}\n"
+        f"  {CHKPNT_PATH=}\n"
+        f"  {ARGS.continue_chkpnt=}\n"
+        f"  {ARGS.n_epoch=}\n"
+        f"  {ARGS.hidden_multi=}\n"
+        f"  {ARGS.dataset=}\n"
+        f"  {ARGS.dataset_LLM=}\n"
+        f"  {ARGS.s1_type=}\n"
+        f"  {ARGS.s2_type=}\n"
+        f"  {ARGS.shuffle=}\n"
+        f"  {ARGS.learning_rate=}\n"
+        f"  {ARGS.batch_size_train=}\n"
+        f"  {ARGS.perm_cnt=}\n"
+        f"  {ARGS.sig_lvl=}\n"
+        f"  Testing batch size={'In Code' if ARGS.use_custom_test else ARGS.batch_size_test}\n"
+        f"  {ARGS.use_custom_test=}\n"
+        f"  {ARGS.eval_interval=}\n"
+        f"  {ARGS.device=}\n"
+        f"  {ARGS.seed=}\n"
         )
     
     # Start training
-    continue_epoch = chkpnt_epoch_max
     J_stars, mmd_values, mmd_stds = dktst.train_and_test(
         s1_tr=data_s1_tr,
         s2_tr=data_s2_tr,
         s1_te=data_s1_te,
         s2_te=data_s2_te,
-        lr=LR,
-        n_epoch=N_EPOCH,
-        batch_size_tr=BATCH_SIZE_TR,
-        batch_size_te=BATCH_SIZE_TE,
+        lr=ARGS.learning_rate,
+        n_epoch=ARGS.n_epoch,
+        batch_size_tr=ARGS.batch_size_train,
+        batch_size_te=ARGS.batch_size_test,
         save_folder=CHKPNT_PATH,
-        perm_cnt=PERM_CNT,
-        sig_lvl=SIG_LVL,
-        continue_epoch=CONTINUE_EPOCH,
-        use_custom_test=USE_CUSTOM_TEST
+        perm_cnt=ARGS.perm_cnt,
+        sig_lvl=ARGS.sig_lvl,
+        continue_epoch=cont_epoch,
+        use_custom_test=ARGS.use_custom_test,
+        eval_inteval=ARGS.eval_interval
     )
+    
+if __name__ == "__main__":
+    START_TIME_STR = datetime.now().strftime("%Y%m%d%H%M%S")
+    ARGS = get_args()
+    # CHKPNT_PATH = get_and_create_chkpnt_path()
+    # LOGGER = setup_logs()
+    
+    START_TIME_STR = datetime.now().strftime("%Y%m%d%H%M%S")
+    ARGS.continue_chkpnt = 'SQuAD1_hm_nos_5_15000_2000_1104_20230810060350'
+    ARGS.n_epoch = 20000
+    ARGS.seed = 1104
+    ARGS.use_custom_test = True
+    CHKPNT_PATH = get_and_create_chkpnt_path()
+    LOGGER = setup_logs()
+    
+    perform_training()
