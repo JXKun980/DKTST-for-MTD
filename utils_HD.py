@@ -279,6 +279,7 @@ def TST_MMD_u(Fea, N_per, N1, Fea_org, sigma, sigma0, ep, alpha, device, dtype, 
     count = 0
     nxy = Fea.shape[0]
     nx = N1
+    # Iteratively perform permutations until we can reject, or until the end, at which point we accept.
     for r in range(N_per):
         # print r
         ind = np.random.choice(nxy, nxy, replace=False)
@@ -293,7 +294,7 @@ def TST_MMD_u(Fea, N_per, N1, Fea_org, sigma, sigma0, ep, alpha, device, dtype, 
 
         TEMP = h1_mean_var_gram(Kx, Ky, Kxy, is_var_computed=False)
         mmd_vector[r] = TEMP[0]
-        if mmd_vector[r] > mmd_value:
+        if mmd_vector[r] > mmd_value: 
             count = count + 1
         if count > np.ceil(N_per * alpha):
             h = 0
@@ -304,7 +305,7 @@ def TST_MMD_u(Fea, N_per, N1, Fea_org, sigma, sigma0, ep, alpha, device, dtype, 
     if h == 1:
         S_mmd_vector = np.sort(mmd_vector)
         #        print(np.int(np.ceil(N_per*alpha)))
-        threshold = S_mmd_vector[np.int(np.ceil(N_per * (1 - alpha)))]
+        threshold = S_mmd_vector[np.int(np.ceil(N_per * (1 - alpha)))] # the MMD cutoff between accept and reject
     return h, threshold, mmd_value.item()
 
 def TST_MMD_u_linear_kernel(Fea, N_per, N1, alpha,  device, dtype):

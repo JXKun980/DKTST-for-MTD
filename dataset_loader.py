@@ -13,6 +13,9 @@ import re
 # GPT4
 # StableLM
 
+# Common Issues
+# 1. Tensorboard display you need to run the folder not the specific log
+
 
 # you can add more datasets here and write your own dataset parsing function
 DATASETS = ['TruthfulQA', 'SQuAD1', 'NarrativeQA']
