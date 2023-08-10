@@ -1,2 +1,0 @@
-,Checkpoint Name,Linear Layer Size Multiple,Train - Dataset Name,Train - Dataset LLM Name,Train - S1 S2 Type,Train - Shuffled,Train - Epoch Count,Train - Batch Size,Test - Dataset Name,Test - Dataset LLM Name,Test - S1 S2 Type,Test - Significance Level,Test - Permutation Count,Test - Shuffled,Test - Batch Size,Test - Seed
-0,SQuAD1_hm_s_3_4000_2000_1102_20230531184222,3,SQuAD1,ChatGPT,hm,True,4000,2000,SQuAD1,ChatGPT,hm,0.05,2000,True,20,1102
