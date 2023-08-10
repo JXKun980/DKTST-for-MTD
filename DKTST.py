@@ -1,16 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Dec 21 14:57:02 2019
-@author: Learning Deep Kernels for Two-sample Test
-@Implementation of MMD-D in our paper on HDGM dataset
-
-BEFORE USING THIS CODE:
-1. This code requires PyTorch 1.1.0, which can be found in
-https://pytorch.org/get-started/previous-versions/ (CUDA version is 10.1).
-2. Numpy and Sklearn are also required. Users can install
-Python via Anaconda (Python 3.7.3) to obtain both packages. Anaconda
-can be found in https://www.anaconda.com/distribution/#download-section .
-"""
 import math
 import os
 
