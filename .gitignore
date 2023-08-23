@@ -161,8 +161,10 @@ cython_debug/
 
 
 # User defined
-checkpoints/
+models/
 datasets/
 test_logs/
+analysis_logs/
+archive/
 todo.txt
 temp.py

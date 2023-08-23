@@ -1,16 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Dec 21 14:57:02 2019
-@author: Learning Deep Kernels for Two-sample Test
-@Implementation of MMD-D in our paper on HDGM dataset
-
-BEFORE USING THIS CODE:
-1. This code requires PyTorch 1.1.0, which can be found in
-https://pytorch.org/get-started/previous-versions/ (CUDA version is 10.1).
-2. Numpy and Sklearn are also required. Users can install
-Python via Anaconda (Python 3.7.3) to obtain both packages. Anaconda
-can be found in https://www.anaconda.com/distribution/#download-section .
-"""
 import math
 import os
 
@@ -20,8 +7,8 @@ from transformers import DistilBertTokenizer, DistilBertModel
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
-import dataset_loader as dataset_loader
-from utils_HD import MatConvert, MMDu, TST_MMD_u
+from external.dktst_utils_HD import MatConvert, MMDu, TST_MMD_u
+import util
     
 class DKTST:
     class ModelLatentF(torch.nn.Module):
@@ -100,7 +87,7 @@ class DKTST:
         
     def train_and_test(self, s1_tr, s1_te, s2_tr, s2_te, lr, n_epoch, batch_size_tr, 
                        batch_size_te, save_folder, perm_cnt, sig_lvl, continue_epoch=0, 
-                       use_custom_test=True, eval_inteval=100, seed=1102):
+                       use_custom_test=True, eval_inteval=100, save_interval=500, seed=1102):
         self.logger.debug("Start training...")
         
         # Input validation
@@ -112,9 +99,7 @@ class DKTST:
         writer = SummaryWriter(log_dir=save_folder)
         
         # Set fixed seeds
-        np.random.seed(seed=seed)
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
+        util.setup_seeds(seed=seed)
         
         # Create save folder
         if not os.path.exists(save_folder):
@@ -131,13 +116,14 @@ class DKTST:
         
         # Formulate and encode dataset
         train_size = len(s1_tr)
+        self.logger.info(f"Train size is {train_size}")
         train_cls_s1 = self.encode_sentences(s1_tr)
         train_cls_s2 = self.encode_sentences(s2_tr)
         
         # Training loop
         batch_cnt = math.ceil(train_size / batch_size_tr)
         best_power = 0
-        best_checkpoint = 0
+        best_chkpnt = 0
         self.latent.train()
         for t in tqdm(range(continue_epoch, n_epoch), desc="Training Progress"): # Epoch Loop, +1 here to end at a whole numbered epoch
             J_stars_batch = np.zeros([batch_cnt])
@@ -196,45 +182,45 @@ class DKTST:
                   + f"Statistic: {-1 * mmd_std_epoch:0>.8} ")
             
             # At checkpoint
-            if t != 0 and t % eval_inteval == 0:
-                self.logger.info(f"========== Checkpoint at Epoch {t} ==========")
-                
-                # Evaluate model using training set
-                self.logger.info("Recording training accuracy...")
-                train_power, train_threshold, train_mmd = self.test(s1=s1_tr, s2=s2_tr, batch_size=batch_size_te, 
-                                                    perm_cnt=perm_cnt, sig_lvl=sig_lvl)
-                writer.add_scalar('Train/train_power', train_power, t)
-                writer.add_scalar('Train/train_threshold', train_threshold, t)
-                writer.add_scalar('Train/train_mmd', train_mmd, t)
-                self.logger.info(f"Epoch {t}: "
-                  + f"train_power: {train_power} "
-                  + f"train_threshold: {train_threshold} "
-                  + f"train_mmd: {train_mmd} ")
-                
-                # Evaluate model using test set
-                self.logger.info("Validating model...")
-                
-                # Custom test consists of both type 1 and 2 error test, for different batch sizes
-                if use_custom_test:
-                    val_power_avg = self.custom_test_procedure(s1_te, s2_te, perm_cnt, sig_lvl, writer, t)
-                else:
-                    val_power_avg, _, _ = self.test(s1_te, s2_te, batch_size_te, perm_cnt, sig_lvl, seed)
-                    # Note no validation result put into running statistics for tensorboard TODO
-                
-                # Update best model
-                if val_power_avg >= best_power:
-                    best_power = val_power_avg
-                    best_checkpoint = t
-                self.logger.info(f"Best model at {best_checkpoint}")
-            
-                # Save model
-                self.save(save_folder=save_folder, epoch=t)
+            if t != 0:
+                if t % eval_inteval == 0:
+                    self.logger.info(f"========== Checkpoint at Epoch {t} ==========")
+                    
+                    # Evaluate model using training set
+                    self.logger.info("Recording training accuracy...")
+                    train_power, train_threshold, train_mmd = self.test(s1=s1_tr, s2=s2_tr, batch_size=batch_size_te, 
+                                                        perm_cnt=perm_cnt, sig_lvl=sig_lvl)
+                    writer.add_scalar('Train/train_power', train_power, t)
+                    writer.add_scalar('Train/train_threshold', train_threshold, t)
+                    writer.add_scalar('Train/train_mmd', train_mmd, t)
+                    self.logger.info(f"Epoch {t}: "
+                    + f"train_power: {train_power} "
+                    + f"train_threshold: {train_threshold} "
+                    + f"train_mmd: {train_mmd} ")
+                    
+                    # Evaluate model using test set
+                    self.logger.info("Validating model...")
+                    
+                    # Custom test consists of both type 1 and 2 error test, for different batch sizes
+                    if use_custom_test:
+                        val_power_avg = self.custom_test_procedure(s1_te, s2_te, perm_cnt, sig_lvl, writer, t)
+                    else:
+                        val_power_avg, _, _ = self.test(s1_te, s2_te, batch_size_te, perm_cnt, sig_lvl, seed)
+                        # Note no validation result put into running statistics for tensorboard TODO
+                    
+                    # Update best model
+                    if val_power_avg >= best_power:
+                        best_power = val_power_avg
+                        best_chkpnt = t
+                    self.logger.info(f"Best model at {best_chkpnt}")
+                if t % save_interval == 0:
+                    self.save(save_folder=save_folder, epoch=t)
             
         # Save deep kernel neural network
         self.save(save_folder=save_folder, epoch=t)
         
         # Indicate best model
-        self.logger.info(f"Best model at checkpoint {best_checkpoint}")
+        self.logger.info(f"Best model at checkpoint {best_chkpnt}")
         
         return J_stars_epoch, mmd_values_epoch, mmd_stds_epoch
     
@@ -264,12 +250,11 @@ class DKTST:
         assert len(s1) == len(s2), "S1 and S2 must contain same number of samples"
         
         # Set fixed seeds
-        np.random.seed(seed=seed)
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
+        util.setup_seeds(seed=seed)
         
         # Formulate and encode dataset
         test_size = len(s1)
+        self.logger.info(f"Test size is {test_size}")
         test_cls_s1 = self.encode_sentences(s1)
         test_cls_s2 = self.encode_sentences(s2)
         
@@ -320,7 +305,7 @@ class DKTST:
         return test_power, threshold_avg, mmd_avg
     
     def custom_test_procedure(self, s1, s2, perm_cnt, sig_lvl, writer=None, epoch=None):
-        batch_sizes = [20, 10, 5, 4, 3]
+        batch_sizes = [10]
         val_power_diff_sum = 0
         for bs in batch_sizes: # Test for all these batch sizes for testing
             # Test of Type II error (Assuming s1 and s2 are different distributions)

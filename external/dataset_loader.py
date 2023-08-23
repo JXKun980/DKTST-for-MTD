@@ -58,7 +58,7 @@ def process_text_truthfulqa_adv(text):
     return text
 
 
-def load_TruthfulQA(detectLLM):
+def load_TruthfulQA(detectLLM, train_ratio):
     f = pd.read_csv("datasets/TruthfulQA_LLMs.csv")
     q = f['Question'].tolist()
     a_human = f['Best Answer'].tolist()
@@ -90,7 +90,7 @@ def load_TruthfulQA(detectLLM):
 
     total_num = len(res)
     for i in tqdm.tqdm(range(total_num), desc="parsing data"):
-        if i < total_num * 0.8:
+        if i < total_num * train_ratio:
             data_partition = 'train'
         else:
             data_partition = 'test'
@@ -107,7 +107,7 @@ def load_TruthfulQA(detectLLM):
     return data_new
 
 
-def load_SQuAD1(detectLLM):
+def load_SQuAD1(detectLLM, train_ratio):
     f = pd.read_csv("datasets/SQuAD1_LLMs.csv")
     q = f['Question'].tolist()
     a_human = [eval(_)['text'][0] for _ in f['answers'].tolist()]
@@ -136,7 +136,7 @@ def load_SQuAD1(detectLLM):
 
     total_num = len(res)
     for i in tqdm.tqdm(range(total_num), desc="parsing data"):
-        if i < total_num * 0.8:
+        if i < total_num * train_ratio:
             data_partition = 'train'
         else:
             data_partition = 'test'
@@ -150,7 +150,7 @@ def load_SQuAD1(detectLLM):
     return data_new
 
 
-def load_NarrativeQA(detectLLM):
+def load_NarrativeQA(detectLLM, train_ratio):
     f = pd.read_csv("datasets/NarrativeQA_LLMs.csv")
     q = f['Question'].tolist()
     a_human = f['answers'].tolist()
@@ -181,7 +181,7 @@ def load_NarrativeQA(detectLLM):
 
     total_num = len(res)
     for i in tqdm.tqdm(range(total_num), desc="parsing data"):
-        if i < total_num * 0.8:
+        if i < total_num * train_ratio:
             data_partition = 'train'
         else:
             data_partition = 'test'
