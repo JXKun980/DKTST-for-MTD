@@ -86,7 +86,7 @@ class DKTST:
         return batch_data_cls
         
     def train_and_test(self, s1_tr, s1_te, s2_tr, s2_te, lr, n_epoch, batch_size_tr, 
-                       batch_size_te, save_folder, perm_cnt, sig_lvl, continue_epoch=0, 
+                       batch_size_te, save_folder, perm_cnt, sig_lvl, start_epoch=0, 
                        use_custom_test=True, eval_inteval=100, save_interval=500, seed=1102):
         self.logger.debug("Start training...")
         
@@ -106,7 +106,7 @@ class DKTST:
             os.makedirs(save_folder)
             
         # Set up optmizer
-        if continue_epoch == 0: # if starting fresh training, use new LR
+        if start_epoch == 0: # if starting fresh training, use new LR
             self.optimizer = torch.optim.Adam(self.get_parameters_list(), lr=lr)
         
         # Init Running Statistics
@@ -125,7 +125,7 @@ class DKTST:
         best_power = 0
         best_chkpnt = 0
         self.latent.train()
-        for t in tqdm(range(continue_epoch, n_epoch), desc="Training Progress"): # Epoch Loop, +1 here to end at a whole numbered epoch
+        for t in tqdm(range(start_epoch, n_epoch), desc="Training Progress"): # Epoch Loop, +1 here to end at a whole numbered epoch
             J_stars_batch = np.zeros([batch_cnt])
             mmd_values_batch = np.zeros([batch_cnt])
             mmd_stds_batch = np.zeros([batch_cnt])
@@ -224,8 +224,8 @@ class DKTST:
         
         return J_stars_epoch, mmd_values_epoch, mmd_stds_epoch
     
-    def load(self, model_path):
-        chkpnt = torch.load(model_path)
+    def load(self, chkpnt_path):
+        chkpnt = torch.load(chkpnt_path)
         self.latent.load_state_dict(chkpnt['model_state_dict'])
         self.optimizer.load_state_dict(chkpnt['optimizer_state_dict'])
         
