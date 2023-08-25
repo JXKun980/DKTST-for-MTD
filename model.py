@@ -90,10 +90,7 @@ class DKTST:
                        use_custom_test=True, eval_inteval=100, save_interval=500, seed=1102):
         self.logger.debug("Start training...")
         
-        # Input validation
-        assert len(s1_tr) == len(s2_tr) and len(s1_te) == len(s2_te), "S1 and S2 must contain same number of samples"
         n_epoch += 1 # To end up at a whole numbered epoch
-        
         
         # Set up tensorboard
         writer = SummaryWriter(log_dir=save_folder)
@@ -116,7 +113,6 @@ class DKTST:
         
         # Formulate and encode dataset
         train_size = len(s1_tr)
-        self.logger.info(f"Train size is {train_size}")
         train_cls_s1 = self.encode_sentences(s1_tr)
         train_cls_s2 = self.encode_sentences(s2_tr)
         

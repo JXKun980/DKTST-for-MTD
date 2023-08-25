@@ -1,10 +1,8 @@
 from argparse import ArgumentParser
 import os
 import re
-import copy
 
 import torch
-import yaml
 
 from model import DKTST
 import util
@@ -25,49 +23,6 @@ def get_and_create_model_path(args, start_time_str):
     if not os.path.exists(model_path):
         os.makedirs(model_path)
     return model_path
-
-
-def get_preprocessed_data(args, logger):
-    # Input validation
-    assert args['s1_type'] in ['human', 'machine'] and args['s2_type'] in ['human', 'machine'], "S1 and S2 type must be one of: human, machine."
-    
-    # Set up dataset
-    logger.info(f'Loading dataset {args["dataset"]}...')
-    human_tr, human_te, machine_tr, machine_te = util.load_data(
-        dataset_name=args['dataset'],
-        llm_name=args['dataset_LLM'],
-        shuffle=args['shuffle'],
-        train_ratio=0.8
-    )
-    
-    # Allocate data to S1 and S2
-    if args['s1_type'] == 'human':
-        s1_tr = human_tr
-        s1_te = human_te
-    elif args['s1_type'] == 'machine':
-        s1_tr = machine_tr
-        s1_te = machine_te
-    else:
-        raise ValueError("Sample data type not recognized")
-    
-    if args['s2_type'] == 'human':
-        s2_tr = human_tr
-        s2_te = human_te
-    elif args['s2_type'] == 'machine':
-        s2_tr = machine_tr
-        s2_te = machine_te
-    else:
-        raise ValueError("Sample data type not recognized")
-
-    # If two sets use the same type, use half of the data of that type for each set so they are disjoint
-    if args['s1_type'] == args['s2_type']:
-        s = len(s1_tr)//2
-        s1_tr = s1_tr[:s]
-        s2_tr = s2_tr[s:s*2]
-        s = len(s1_te)//2
-        s1_te = s1_te[:s]
-        s2_te = s2_te[s:s*2]
-    return s1_tr, s1_te, s2_tr, s2_te
 
 
 def get_continue_epoch(model_path):
@@ -97,40 +52,6 @@ def log_training_parameters(args, logger, model_path):
     logger.info(logging_str)
 
 
-class Training_Config_Handler:
-    train_config_file_name = 'train_config.yml'
-    
-    def save_training_config(args, model_path):
-        dump_args = { # Only these parameters gets saved with the model
-            'n_epoch': args['n_epoch'],
-            'hidden_multi': args['hidden_multi'],
-            'dataset': args['dataset'],
-            'dataset_LLM': args['dataset_LLM'],
-            's1_type': args['s1_type'],
-            's2_type': args['s2_type'],
-            'shuffle': args['shuffle'],
-            'learning_rate': args['learning_rate'],
-            'batch_size_train': args['batch_size_train'],
-            'eval_interval': args['eval_interval'],
-            'save_interval': args['save_interval'],
-            'seed': args['seed'],
-            'perm_cnt': args['perm_cnt'],
-            'sig_lvl': args['sig_lvl'],
-            'batch_size_test': args['batch_size_test'] if not args['use_custom_test'] else "In Code",
-            'use_custom_test': args['use_custom_test'],
-        }
-        with open(os.path.join(model_path, Training_Config_Handler.train_config_file_name), 'w') as file:
-            yaml.dump(dump_args, file)
-            
-    def load_training_config_to_args(args, model_path):
-        with open(os.path.join(model_path, Training_Config_Handler.train_config_file_name), 'r') as file:
-            load_args = yaml.safe_load(file)
-            args_copy = copy.copy(args)
-            for k, v in load_args.items():
-                args_copy[k] = v
-        return args_copy
-
-
 def start_training(args):
     '''Start a training instance based on the arguments'''
     start_time_str = util.get_current_time_str()
@@ -143,9 +64,9 @@ def start_training(args):
         
     # Save or load training config
     if args['continue_model']:
-        args = Training_Config_Handler.load_training_config_to_args(args, model_path) # Override args with loaded args
+        args = util.Training_Config_Handler.load_training_config_to_args(args, model_path) # Override args with loaded args
     else:
-        Training_Config_Handler.save_training_config(args, model_path)
+        util.Training_Config_Handler.save_training_config(args, model_path)
         
     # Get start epoch
     start_epoch = get_continue_epoch(model_path)+1 if args['continue_model'] else 0
@@ -158,6 +79,7 @@ def start_training(args):
     )
     
     # Set up model
+    logger.info(f'Setting up model...')
     dktst = DKTST(
         latent_size_multi=args['hidden_multi'],
         device=args['device'],
@@ -170,16 +92,26 @@ def start_training(args):
     
     util.setup_seeds(args['seed'])
     
-    s1_tr, s1_te, s2_tr, s2_te = get_preprocessed_data(args, logger)
+    # Load dataset
+    logger.info(f'Loading dataset {args["dataset"]}...')
+    dataloader = util.Data_Loader(
+        dataset_name=args['dataset'],
+        llm_name=args['dataset_llm'],
+        s1_type=args['s1_type'],
+        s2_type=args['s2_type'],
+        shuffle=args['shuffle'],
+        train_ratio=0.8,
+    )
+    logger.info(f'Loaded dataset with training size {dataloader.train_size} and test size {dataloader.test_size}...')
     
     log_training_parameters(args, logger, model_path)
     
     logger.info("============ Training Starts ============\n")
     J_stars, mmd_values, mmd_stds = dktst.train_and_test(
-        s1_tr=s1_tr,
-        s2_tr=s2_tr,
-        s1_te=s1_te,
-        s2_te=s2_te,
+        s1_tr=dataloader.s1_tr,
+        s1_te=dataloader.s1_te,
+        s2_tr=dataloader.s2_tr,
+        s2_te=dataloader.s2_te,
         lr=args['learning_rate'],
         n_epoch=args['n_epoch'],
         batch_size_tr=args['batch_size_train'],
