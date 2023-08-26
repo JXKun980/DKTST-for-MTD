@@ -15,7 +15,7 @@ def get_and_create_model_path(args, start_time_str):
         f"_{'s' if args['shuffle'] else 'nos'}"
         f"_{args['hidden_multi']}"
         f"_{args['n_epoch']}"
-        f"_{args['batch_size_train']}"
+        f"_{args['sample_size_train']}"
         f"_{args['seed']}"
         f"_{start_time_str}"
     )
@@ -44,10 +44,7 @@ def log_training_parameters(args, logger, model_path):
         f"   {model_path=}\n")
     
     for arg, val in args.items():
-        if arg != "batch_size_test":
-            logging_str += f"   {arg}={val}\n"
-        else:
-            logging_str += f"   {arg}={'In Code' if args['use_custom_test'] else val}\n"
+        logging_str += f"   {arg}={val}\n"
             
     logger.info(logging_str)
 
@@ -94,28 +91,28 @@ def start_training(args):
     
     # Load dataset
     logger.info(f'Loading dataset {args["dataset"]}...')
-    dataloader = util.Data_Loader(
-        dataset_name=args['dataset'],
-        llm_name=args['dataset_llm'],
+    
+    data_tr, data_te = util.get_two_sample_datset(
+        dataset=args['dataset'],
+        dataset_llm=args['dataset_llm'],
         s1_type=args['s1_type'],
         s2_type=args['s2_type'],
+        sample_size_test=args['sample_size_test'],
+        sample_size_train=args['sample_size_train'],
         shuffle=args['shuffle'],
-        train_ratio=0.8,
+        train_ratio=args['dataset_train_ratio'],
     )
-    logger.info(f'Loaded dataset with training size {dataloader.train_size} and test size {dataloader.test_size}...')
+    
+    logger.info(f'Loaded dataset with training size {len(data_tr)} and test size {len(data_te)}...')
     
     log_training_parameters(args, logger, model_path)
     
     logger.info("============ Training Starts ============\n")
     J_stars, mmd_values, mmd_stds = dktst.train_and_test(
-        s1_tr=dataloader.s1_tr,
-        s1_te=dataloader.s1_te,
-        s2_tr=dataloader.s2_tr,
-        s2_te=dataloader.s2_te,
+        data_tr=data_tr,
+        data_te=data_te,
         lr=args['learning_rate'],
         n_epoch=args['n_epoch'],
-        batch_size_tr=args['batch_size_train'],
-        batch_size_te=args['batch_size_test'],
         save_folder=model_path,
         perm_cnt=args['perm_cnt'],
         sig_lvl=args['sig_lvl'],
@@ -129,28 +126,30 @@ def start_training(args):
 def get_args():
     # Setup parser
     parser = ArgumentParser()
-    # Per Run parameters
+    # Per Run Parameters
     parser.add_argument('--model_dir', type=str, default='./models')
     parser.add_argument('--device', '-dv', type=str, default='auto')
     parser.add_argument('--debug', default=False, action='store_true')
+    # Continue Parameters
     parser.add_argument('--continue_model', type=str, default=None) # If this is set, all parameters below do not matter
     # Training parameters
     parser.add_argument('--hidden_multi', type=int, default=5) # Hidden dim = In dim * Multiplier
     parser.add_argument('--n_epoch', '-e', type=int, default=8000)
     parser.add_argument('--dataset', '-d', type=str, default='SQuAD1') # TruthfulQA, SQuAD1, NarrativeQA
-    parser.add_argument('--dataset_LLM', '-dl', type=str, default='ChatGPT') # ChatGPT, BloomZ, ChatGLM, Dolly, ChatGPT-turbo, GPT4, StableLM
+    parser.add_argument('--dataset_llm', '-dl', type=str, default='ChatGPT') # ChatGPT, BloomZ, ChatGLM, Dolly, ChatGPT-turbo, GPT4, StableLM
+    parser.add_argument('--dataset_train_ratio', '-dtr', type=float, default=0.8)
     parser.add_argument('--s1_type', type=str, default='human') # Type of data (human or machine) for the first sample set
     parser.add_argument('--s2_type', type=str, default='machine') # Type of data (human or machine) for the second sample set
     parser.add_argument('--shuffle', default=False, action='store_true') # Shuffle make sure each pair of answers do not correspond to the same questions
     parser.add_argument('--learning_rate', '-lr', type=float, default=0.001)
-    parser.add_argument('--batch_size_train', '-btr', type=int, default=2000)
+    parser.add_argument('--sample_size_train', '-btr', type=int, default=20)
     parser.add_argument('--eval_interval', type=int, default=100) # Evaluation interval
     parser.add_argument('--save_interval', type=int, default=500) # Evaluation interval
-    parser.add_argument('--seed', '-s', type=int, default=1102)
+    parser.add_argument('--seed', '-s', type=int, default=1103)
     # Validation parameters
     parser.add_argument('--perm_cnt', '-pc', type=int, default=200)
     parser.add_argument('--sig_lvl', '-a', type=float, default=0.05)
-    parser.add_argument('--batch_size_test', '-bte', type=int, default=20) # Not used if custom validation procedure is used
+    parser.add_argument('--sample_size_test', '-bte', type=int, default=20) # Not used if custom validation procedure is used
     parser.add_argument('--use_custom_test', default=False, action='store_true') # Custom validation that test for a range of batch sizes etc.
     args = parser.parse_args()
     
@@ -166,16 +165,50 @@ def get_args():
 def main():
     args = get_args()
     
-    # Custom run parameter in code
-    args['n_epoch'] = 20000
+    # # Custom run parameter in code
+    args['n_epoch'] = 10000
+    args['hidden_multi'] = 3
+    args['shuffle'] = False
+    args['dataset'] = 'TruthfulQA'
+    args['sample_size_train'] = 2000
+    args['seed'] = 1103
+    args['use_custom_test'] = True
+    args['learning_rate'] = 0.001
+    start_training(args)
+    
+    # # Custom run parameter in code
+    args['n_epoch'] = 10000
+    args['hidden_multi'] = 3
+    args['shuffle'] = True
+    args['dataset'] = 'TruthfulQA'
+    args['sample_size_train'] = 2000
+    args['seed'] = 1103
+    args['use_custom_test'] = True
+    args['learning_rate'] = 0.001
+    start_training(args)
+
+    # # Custom run parameter in code
+    args['n_epoch'] = 10000
+    args['hidden_multi'] = 5
+    args['shuffle'] = True
+    args['dataset'] = 'TruthfulQA'
+    args['sample_size_train'] = 2000
+    args['seed'] = 1103
+    args['use_custom_test'] = True
+    args['learning_rate'] = 0.001
+    start_training(args)
+    
+    # # Custom run parameter in code
+    args['n_epoch'] = 10000
     args['hidden_multi'] = 5
     args['shuffle'] = False
     args['dataset'] = 'TruthfulQA'
-    args['seed'] = 1106
+    args['sample_size_train'] = 2000
+    args['seed'] = 1104
     args['use_custom_test'] = True
-    args['save_interval'] = 100
-    
+    args['learning_rate'] = 0.001
     start_training(args)
+    
     
     
 if __name__ == "__main__":

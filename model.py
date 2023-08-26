@@ -1,8 +1,10 @@
 import math
 import os
+import logging
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader as TorchDataLoader
 from transformers import DistilBertTokenizer, DistilBertModel
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
@@ -35,7 +37,7 @@ class DKTST:
                  latent_size_multi, 
                  device, 
                  dtype,
-                 logger) -> None:
+                 logger: logging.Logger) -> None:
         
         self.device = device
         self.dtype = dtype
@@ -72,7 +74,7 @@ class DKTST:
     def get_parameters_list(self):
         return list(self.latent.parameters()) + [self.epsilonOPT] + [self.sigmaOPT] + [self.sigma0OPT]
     
-    def encode_sentences(self, s):
+    def encode_sentences(self, s: 'list[any]') -> 'list[any]':
         """
         @inputs
             s: batch of sentences to be encoded
@@ -81,13 +83,23 @@ class DKTST:
             batch_data_tokenized = self.tokenizer(s, truncation=True, padding=True, return_tensors='pt').to(self.device)
             # truncation=True: truncate to the maximum length the model is allowed to take
             # padding=True: pad to the longest sequence of the batch
-            batch_data_encoded = self.encoder(**batch_data_tokenized) #dim : [batch_size(nr_sentences), tokens, emb_dim]
+            batch_data_encoded = self.encoder(**batch_data_tokenized) #dim : [sample_size(nr_sentences), tokens, emb_dim]
             batch_data_cls = batch_data_encoded.last_hidden_state[:,0,:] # First token embedding for each sample is the CLS output
         return batch_data_cls
         
-    def train_and_test(self, s1_tr, s1_te, s2_tr, s2_te, lr, n_epoch, batch_size_tr, 
-                       batch_size_te, save_folder, perm_cnt, sig_lvl, start_epoch=0, 
-                       use_custom_test=True, eval_inteval=100, save_interval=500, seed=1102):
+    def train_and_test(self, 
+                       data_tr: util.Two_Sample_Dataset, 
+                       data_te: util.Two_Sample_Dataset, 
+                       lr, 
+                       n_epoch, 
+                       save_folder, 
+                       perm_cnt, 
+                       sig_lvl, 
+                       start_epoch=0, 
+                       use_custom_test=True, 
+                       eval_inteval=100, 
+                       save_interval=500, 
+                       seed=1102):
         self.logger.debug("Start training...")
         
         n_epoch += 1 # To end up at a whole numbered epoch
@@ -112,25 +124,26 @@ class DKTST:
         mmd_stds_epoch = np.zeros([n_epoch])
         
         # Formulate and encode dataset
-        train_size = len(s1_tr)
-        train_cls_s1 = self.encode_sentences(s1_tr)
-        train_cls_s2 = self.encode_sentences(s2_tr)
+        data_tr_cls = data_tr.copy_and_map(self.encode_sentences)
+        
+        # Get test data that contain only the same type, to test for type I error
+        data_te_s1_only = data_te.copy_with_single_type(use_s1=True)
         
         # Training loop
-        batch_cnt = math.ceil(train_size / batch_size_tr)
         best_power = 0
         best_chkpnt = 0
         self.latent.train()
         for t in tqdm(range(start_epoch, n_epoch), desc="Training Progress"): # Epoch Loop, +1 here to end at a whole numbered epoch
-            J_stars_batch = np.zeros([batch_cnt])
-            mmd_values_batch = np.zeros([batch_cnt])
-            mmd_stds_batch = np.zeros([batch_cnt])
-            for b in range(0, batch_cnt): # Batche Loop
+            J_stars_batch = np.zeros([len(data_tr_cls)])
+            mmd_values_batch = np.zeros([len(data_tr_cls)])
+            mmd_stds_batch = np.zeros([len(data_tr_cls)])
+            
+            dataloader = TorchDataLoader(dataset=data_tr_cls, batch_size=1, shuffle=True)
+            for s_idx, (s1_cls, s2_cls) in enumerate(dataloader): # Batche Loop
                 # Get batch data
-                start = b*batch_size_tr
-                end = min((b+1)*batch_size_tr, train_size)
-                batch_size_actual = end - start
-                batch_cls = torch.cat((train_cls_s1[start:end,:], train_cls_s2[start:end,:]))
+                s1_cls = torch.squeeze(s1_cls, 0)
+                s2_cls = torch.squeeze(s2_cls, 0)
+                s1s2_cls = torch.cat((s1_cls, s2_cls))
             
                 # Compute epsilon, sigma and sigma_0
                 ep = torch.exp(self.epsilonOPT) / (1 + torch.exp(self.epsilonOPT))
@@ -138,10 +151,10 @@ class DKTST:
                 sigma0_u = self.sigma0OPT ** 2
                 
                 # Compute output of the deep network
-                batch_data_latent = self.latent(batch_cls)
+                s1s2_latent = self.latent(s1s2_cls)
                 
                 # Compute J (STAT_u)
-                TEMP = MMDu(batch_data_latent, batch_size_actual, batch_cls, sigma, sigma0_u, ep)
+                TEMP = MMDu(s1s2_latent, s1_cls.shape[0], s1s2_cls, sigma, sigma0_u, ep)
                 mmd_value_temp = -1 * (TEMP[0]+10**(-8))
                 mmd_std_temp = torch.sqrt(TEMP[1]+10**(-8))
                 if mmd_std_temp.item() == 0:
@@ -156,9 +169,9 @@ class DKTST:
                 self.optimizer.step()
                 
                 # Record stats for the batch
-                J_stars_batch[b] = STAT_u.item()
-                mmd_values_batch[b] = mmd_value_temp.item()
-                mmd_stds_batch[b] = mmd_std_temp.item()
+                J_stars_batch[s_idx] = STAT_u.item()
+                mmd_values_batch[s_idx] = mmd_value_temp.item()
+                mmd_stds_batch[s_idx] = mmd_std_temp.item()
                 
             # Calculate epoch stats
             J_star_epoch = np.average(J_stars_batch)
@@ -173,9 +186,9 @@ class DKTST:
             writer.add_scalar('Train/mmd_values', mmd_value_epoch, t)
             writer.add_scalar('Train/mmd_stds', mmd_std_epoch, t)
             self.logger.info(f"Epoch {t}: "
-                  + f"mmd_value: {1 * J_star_epoch:0>.8} " 
-                  + f"mmd_std: {mmd_value_epoch:0>.8} "
-                  + f"Statistic: {-1 * mmd_std_epoch:0>.8} ")
+                  + f"J_stars: {1 * J_star_epoch:0>.8} " 
+                  + f"mmd_values: {mmd_value_epoch:0>.8} "
+                  + f"mmd_stds: {-1 * mmd_std_epoch:0>.8} ")
             
             # At checkpoint
             if t != 0:
@@ -184,7 +197,7 @@ class DKTST:
                     
                     # Evaluate model using training set
                     self.logger.info("Recording training accuracy...")
-                    train_power, train_threshold, train_mmd = self.test(s1=s1_tr, s2=s2_tr, batch_size=batch_size_te, 
+                    train_power, train_threshold, train_mmd = self.test(data=data_tr, 
                                                         perm_cnt=perm_cnt, sig_lvl=sig_lvl)
                     writer.add_scalar('Train/train_power', train_power, t)
                     writer.add_scalar('Train/train_threshold', train_threshold, t)
@@ -199,9 +212,14 @@ class DKTST:
                     
                     # Custom test consists of both type 1 and 2 error test, for different batch sizes
                     if use_custom_test:
-                        val_power_avg = self.custom_test_procedure(s1_te, s2_te, perm_cnt, sig_lvl, writer, t)
+                        val_power_avg = self.custom_test_procedure(data_diff=data_te, 
+                                                                   data_same=data_te_s1_only, 
+                                                                   perm_cnt=perm_cnt, 
+                                                                   sig_lvl=sig_lvl, 
+                                                                   writer=writer, 
+                                                                   epoch=t)
                     else:
-                        val_power_avg, _, _ = self.test(s1_te, s2_te, batch_size_te, perm_cnt, sig_lvl, seed)
+                        val_power_avg, _, _ = self.test(data_te, perm_cnt, sig_lvl, seed)
                         # Note no validation result put into running statistics for tensorboard TODO
                     
                     # Update best model
@@ -234,7 +252,7 @@ class DKTST:
         }
         torch.save(chkpnt, file_path)
         
-    def test(self, s1, s2, batch_size, perm_cnt, sig_lvl, seed=1102):
+    def test(self, data: util.Dataset, perm_cnt, sig_lvl, seed=1102):
         '''
         Note test only test full batches, that is if batch size is larger than test size, that part will be discarded.
         Therefore you need to specify a small test batch size (such as 20 or 10)
@@ -242,31 +260,26 @@ class DKTST:
         self.logger.debug("Start testing...")
         self.latent.eval()
         
-        # Input validation
-        assert len(s1) == len(s2), "S1 and S2 must contain same number of samples"
-        
         # Set fixed seeds
         util.setup_seeds(seed=seed)
         
         # Formulate and encode dataset
-        test_size = len(s1)
-        self.logger.info(f"Test size is {test_size}")
-        test_cls_s1 = self.encode_sentences(s1)
-        test_cls_s2 = self.encode_sentences(s2)
+        self.logger.info(f"Test size is {len(data)}")
+        data_cls = data.copy_and_map(self.encode_sentences)
         
         # Init test stats
         count_u = 0
-        batch_cnt = test_size // batch_size # Assuming dataset contains integer number of batches, otherwise truncate
-        H_u = np.zeros(batch_cnt)
-        T_u = np.zeros(batch_cnt)
-        M_u = np.zeros(batch_cnt)
+        H_u = np.zeros(len(data_cls))
+        T_u = np.zeros(len(data_cls))
+        M_u = np.zeros(len(data_cls))
         
         # Test loop over data batches
-        for b in range(0, batch_cnt):
+        dataloader = TorchDataLoader(dataset=data_cls, batch_size=1, shuffle=True)
+        for s_idx, (s1_cls, s2_cls) in enumerate(dataloader):
             # Get batch data
-            start = b*batch_size
-            end = (b+1)*batch_size
-            batch_cls = torch.cat((test_cls_s1[start:end,:], test_cls_s2[start:end,:]))
+            s1_cls = torch.squeeze(s1_cls, 0)
+            s2_cls = torch.squeeze(s2_cls, 0)
+            s1s2_cls = torch.cat((s1_cls, s2_cls))
             
             # Compute epsilon, sigma and sigma_0
             ep = torch.exp(self.epsilonOPT) / (1 + torch.exp(self.epsilonOPT))
@@ -275,10 +288,10 @@ class DKTST:
             
             # Get output from deep kernel using two sample test
             h_u, threshold_u, mmd_value_u = TST_MMD_u(
-                self.latent(batch_cls), 
+                self.latent(s1s2_cls), 
                 perm_cnt, 
-                batch_size, 
-                batch_cls, 
+                s1_cls.shape[0], 
+                s1s2_cls, 
                 sigma, 
                 sigma0_u, 
                 ep, 
@@ -289,43 +302,53 @@ class DKTST:
             # Gather results
             count_u = count_u + h_u
             # print("MMD-DK:", count_u)
-            H_u[b] = h_u
-            T_u[b] = threshold_u
-            M_u[b] = mmd_value_u
+            H_u[s_idx] = h_u
+            T_u[s_idx] = threshold_u
+            M_u[s_idx] = mmd_value_u
             
-        test_power = H_u.sum() / float(batch_cnt)
-        threshold_avg = np.average(T_u[T_u != np.nan])
+        test_power = H_u.sum() / float(len(data_cls))
+        threshold_avg = np.average(T_u[~np.isnan(T_u)])
         mmd_avg = np.average(M_u)
         
         self.latent.train()
+            
         return test_power, threshold_avg, mmd_avg
     
-    def custom_test_procedure(self, s1, s2, perm_cnt, sig_lvl, writer=None, epoch=None):
-        batch_sizes = [10]
+    def custom_test_procedure(self, 
+                              data_diff: util.Two_Sample_Dataset, 
+                              data_same: util.Two_Sample_Dataset, 
+                              perm_cnt, 
+                              sig_lvl, 
+                              writer=None, 
+                              epoch=None):
+        sample_sizes = [10]
         val_power_diff_sum = 0
-        for bs in batch_sizes: # Test for all these batch sizes for testing
+        
+        for ss in sample_sizes: # Test for all these batch sizes for testing
+            data_diff = data_diff.copy_with_new_sample_size(ss)
+            data_same = data_same.copy_with_new_sample_size(ss)
             # Test of Type II error (Assuming s1 and s2 are different distributions)
-            val_power1, val_threshold1, val_mmd1 = self.test(s1=s1, s2=s2, batch_size=bs, perm_cnt=perm_cnt, sig_lvl=sig_lvl) 
-            # Test of Type I error (Assuming s1 and s2 are different distributions)
-            val_power2, val_threshold2, val_mmd2 = self.test(s1=s1, s2=s1, batch_size=bs, perm_cnt=perm_cnt, sig_lvl=sig_lvl) 
+            val_power1, val_threshold1, val_mmd1 = self.test(data=data_diff, perm_cnt=perm_cnt, sig_lvl=sig_lvl) 
+            # Test of Type I error (Assuming s1 and s2 are the same distributions)
+            val_power2, val_threshold2, val_mmd2 = self.test(data=data_same, perm_cnt=perm_cnt, sig_lvl=sig_lvl) 
             
             val_power_diff_sum += val_power1
             
             if writer and epoch:
-                writer.add_scalar(f'Validation/val_power_diff_{bs}', val_power1, epoch)
-                writer.add_scalar(f'Validation/val_threshold_diff_{bs}', val_threshold1, epoch)
-                writer.add_scalar(f'Validation/val_mmd_diff_{bs}', val_mmd1, epoch)
-            self.logger.info(f"Validation power (Diff) batch size {bs}: {val_power1} "
-                        + f"Validation threshold (Diff) batch size {bs}: {val_threshold1} "
-                        + f"Validation mmd (Diff) batch size {bs}: {val_mmd1} ")
+                writer.add_scalar(f'Validation/val_power_diff_{ss}', val_power1, epoch)
+                writer.add_scalar(f'Validation/val_threshold_diff_{ss}', val_threshold1, epoch)
+                writer.add_scalar(f'Validation/val_mmd_diff_{ss}', val_mmd1, epoch)
+            self.logger.info(f"Validation power (Diff) batch size {ss}: {val_power1} "
+                        + f"Validation threshold (Diff) batch size {ss}: {val_threshold1} "
+                        + f"Validation mmd (Diff) batch size {ss}: {val_mmd1} ")
             
             if writer and epoch:
-                writer.add_scalar(f'Validation/val_power_same_{bs}', val_power2, epoch)
-                writer.add_scalar(f'Validation/val_threshold_same_{bs}', val_threshold2, epoch)
-                writer.add_scalar(f'Validation/val_mmd_same_{bs}', val_mmd2, epoch)
-            self.logger.info(f"Validation power (Same) batch size {bs}: {val_power2} "
-                        + f"Validation threshold (Same) batch size {bs}: {val_threshold2} "
-                        + f"Validation mmd (Same) batch size {bs}: {val_mmd2} ")
-        val_power_avg = val_power_diff_sum / len(batch_sizes)
+                writer.add_scalar(f'Validation/val_power_same_{ss}', val_power2, epoch)
+                writer.add_scalar(f'Validation/val_threshold_same_{ss}', val_threshold2, epoch)
+                writer.add_scalar(f'Validation/val_mmd_same_{ss}', val_mmd2, epoch)
+            self.logger.info(f"Validation power (Same) batch size {ss}: {val_power2} "
+                        + f"Validation threshold (Same) batch size {ss}: {val_threshold2} "
+                        + f"Validation mmd (Same) batch size {ss}: {val_mmd2} ")
+        val_power_avg = val_power_diff_sum / len(sample_sizes)
         
         return val_power_avg
