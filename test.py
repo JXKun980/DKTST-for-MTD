@@ -216,7 +216,7 @@ def perform_batch_test(args, logger):
                     new_args['model_name'] = model_name
                     new_args['dataset'] = data_te
                     new_args['dataset_llm'] = data_llm_te
-                    new_args['dataset_train_ratio'] = 0.8
+                    new_args['dataset_train_ratio'] = 0.8 if data_tr == data_te else 0.3
                     new_args['s1_type'] = s1
                     new_args['s2_type'] = s2
                     new_args['shuffle'] = shuffle_te
