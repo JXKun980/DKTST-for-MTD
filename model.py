@@ -91,7 +91,7 @@ class DKTST:
                        data_tr: util.Two_Sample_Dataset, 
                        data_te: util.Two_Sample_Dataset, 
                        lr, 
-                       n_epoch, 
+                       total_epoch, 
                        save_folder, 
                        perm_cnt, 
                        sig_lvl, 
@@ -102,7 +102,7 @@ class DKTST:
                        seed=1102):
         self.logger.debug("Start training...")
         
-        n_epoch += 1 # To end up at a whole numbered epoch
+        total_epoch += 1 # To end up at a whole numbered epoch
         
         # Set up tensorboard
         writer = SummaryWriter(log_dir=save_folder)
@@ -119,21 +119,18 @@ class DKTST:
             self.optimizer = torch.optim.Adam(self.get_parameters_list(), lr=lr)
         
         # Init Running Statistics
-        J_stars_epoch = np.zeros([n_epoch])
-        mmd_values_epoch = np.zeros([n_epoch])
-        mmd_stds_epoch = np.zeros([n_epoch])
+        J_stars_epoch = np.zeros([total_epoch])
+        mmd_values_epoch = np.zeros([total_epoch])
+        mmd_stds_epoch = np.zeros([total_epoch])
         
         # Formulate and encode dataset
         data_tr_cls = data_tr.copy_and_map(self.encode_sentences)
-        
-        # Get test data that contain only the same type, to test for type I error
-        data_te_s1_only = data_te.copy_with_single_type(use_s1=True)
         
         # Training loop
         best_power = 0
         best_chkpnt = 0
         self.latent.train()
-        for t in tqdm(range(start_epoch, n_epoch), desc="Training Progress"): # Epoch Loop, +1 here to end at a whole numbered epoch
+        for t in tqdm(range(start_epoch, total_epoch), initial=start_epoch, total=total_epoch, desc="Training Progress"): # Epoch Loop, +1 here to end at a whole numbered epoch
             J_stars_batch = np.zeros([len(data_tr_cls)])
             mmd_values_batch = np.zeros([len(data_tr_cls)])
             mmd_stds_batch = np.zeros([len(data_tr_cls)])
@@ -197,8 +194,10 @@ class DKTST:
                     
                     # Evaluate model using training set
                     self.logger.info("Recording training accuracy...")
-                    train_power, train_threshold, train_mmd = self.test(data=data_tr, 
-                                                        perm_cnt=perm_cnt, sig_lvl=sig_lvl)
+                    train_power, train_threshold, train_mmd = self.test(
+                                                        data=data_tr.copy_with_new_sample_size(data_te.sample_size), # Test with validation test size
+                                                        perm_cnt=perm_cnt, 
+                                                        sig_lvl=sig_lvl)
                     writer.add_scalar('Train/train_power', train_power, t)
                     writer.add_scalar('Train/train_threshold', train_threshold, t)
                     writer.add_scalar('Train/train_mmd', train_mmd, t)
@@ -213,7 +212,7 @@ class DKTST:
                     # Custom test consists of both type 1 and 2 error test, for different batch sizes
                     if use_custom_test:
                         val_power_avg = self.custom_test_procedure(data_diff=data_te, 
-                                                                   data_same=data_te_s1_only, 
+                                                                   data_same=data_te.copy_with_single_type(use_s1=True), 
                                                                    perm_cnt=perm_cnt, 
                                                                    sig_lvl=sig_lvl, 
                                                                    writer=writer, 
