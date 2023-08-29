@@ -248,25 +248,11 @@ class Single_Sample_Dataset(Dataset):
 class Training_Config_Handler:
     train_config_file_name = 'train_config.yml'
     
-    def save_training_config(args, model_path):
-        dump_args = { # Only these parameters gets saved with the model
-            'n_epoch': args['n_epoch'],
-            'hidden_multi': args['hidden_multi'],
-            'dataset': args['dataset'],
-            'dataset_llm': args['dataset_llm'],
-            's1_type': args['s1_type'],
-            's2_type': args['s2_type'],
-            'shuffle': args['shuffle'],
-            'learning_rate': args['learning_rate'],
-            'sample_size_train': args['sample_size_train'],
-            'eval_interval': args['eval_interval'],
-            'save_interval': args['save_interval'],
-            'seed': args['seed'],
-            'perm_cnt': args['perm_cnt'],
-            'sig_lvl': args['sig_lvl'],
-            'sample_size_test': args['sample_size_test'] if not args['use_custom_test'] else "In Code",
-            'use_custom_test': args['use_custom_test'],
-        }
+    def save_training_config(args: dict, model_path):
+        dump_args = copy.copy(args)
+        exclude_args = ['model_dir', 'device', 'debug', 'continue_model']
+        for ea in exclude_args:
+            del dump_args[ea]
         with open(os.path.join(model_path, Training_Config_Handler.train_config_file_name), 'w') as file:
             yaml.dump(dump_args, file)
             
