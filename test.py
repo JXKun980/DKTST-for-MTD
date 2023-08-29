@@ -18,7 +18,7 @@ def log_testing_parameters(args, logger):
     logger.info(logging_str)
     
 def get_test_result(args, logger):
-    logger.info("=========== Testing Starts ============\n")
+    logger.info("\n\n=========== Testing Starts ============\n")
 
     # Set up dataset
     if not args['single_sample_test']: # Normal two sample test

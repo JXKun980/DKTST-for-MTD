@@ -74,6 +74,7 @@ def start_training(args):
         id=start_time_str,
         is_debug=args['debug']
     )
+    logger.info("\n\n============ Training Starts ============\n")
     
     # Set up model
     logger.info(f'Setting up model...')
@@ -107,12 +108,11 @@ def start_training(args):
     
     log_training_parameters(args, logger, model_path)
     
-    logger.info("============ Training Starts ============\n")
     J_stars, mmd_values, mmd_stds = dktst.train_and_test(
         data_tr=data_tr,
         data_te=data_te,
         lr=args['learning_rate'],
-        n_epoch=args['n_epoch'],
+        total_epoch=args['n_epoch'],
         save_folder=model_path,
         perm_cnt=args['perm_cnt'],
         sig_lvl=args['sig_lvl'],
@@ -166,45 +166,17 @@ def main():
     args = get_args()
     
     # # Custom run parameter in code
-    args['n_epoch'] = 10000
-    args['hidden_multi'] = 3
-    args['shuffle'] = False
-    args['dataset'] = 'TruthfulQA'
-    args['sample_size_train'] = 2000
-    args['seed'] = 1103
-    args['use_custom_test'] = True
-    args['learning_rate'] = 0.001
+    args['continue_model'] = 'TruthfulQA_hm_s_5_10000_2000_1103_20230828150923'
     start_training(args)
+    args['continue_model'] = None
     
-    # # Custom run parameter in code
-    args['n_epoch'] = 10000
-    args['hidden_multi'] = 3
-    args['shuffle'] = True
-    args['dataset'] = 'TruthfulQA'
-    args['sample_size_train'] = 2000
-    args['seed'] = 1103
-    args['use_custom_test'] = True
-    args['learning_rate'] = 0.001
-    start_training(args)
-
     # # Custom run parameter in code
     args['n_epoch'] = 10000
     args['hidden_multi'] = 5
     args['shuffle'] = True
     args['dataset'] = 'TruthfulQA'
-    args['sample_size_train'] = 2000
+    args['sample_size_train'] = 20
     args['seed'] = 1103
-    args['use_custom_test'] = True
-    args['learning_rate'] = 0.001
-    start_training(args)
-    
-    # # Custom run parameter in code
-    args['n_epoch'] = 10000
-    args['hidden_multi'] = 5
-    args['shuffle'] = False
-    args['dataset'] = 'TruthfulQA'
-    args['sample_size_train'] = 2000
-    args['seed'] = 1104
     args['use_custom_test'] = True
     args['learning_rate'] = 0.001
     start_training(args)
