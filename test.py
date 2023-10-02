@@ -2,7 +2,8 @@
 from argparse import ArgumentParser
 import itertools
 import os
-from copy import copy
+import copy
+import re
 
 import torch
 import pandas as pd
@@ -10,6 +11,8 @@ from tqdm import tqdm
 
 import util
 from model import DKTST
+
+# TODO Separate SST and TST into two interfaces
 
 def log_testing_parameters(args, logger):
     logging_str = f"Testing with parameters: \n"
@@ -19,104 +22,146 @@ def log_testing_parameters(args, logger):
     
 def get_test_result(args, logger):
     logger.info("\n\n=========== Testing Starts ============\n")
+    
+    util.setup_seeds(args['seed'])
 
     # Set up dataset
-    if not args['single_sample_test']: # Normal two sample test
-        logger.info(f'Loading two-sample dataset {args["dataset"]}...')
-        _, data_te = util.get_two_sample_datset(
-            dataset=args['dataset'],
-            dataset_llm=args['dataset_llm'],
-            train_ratio=args['dataset_train_ratio'],
-            shuffle=args['shuffle'],
-            sample_size_test=args['sample_size'],
-            sample_size_train=args['sample_size'],
-            s1_type=args['s1_type'],
-            s2_type=args['s2_type'],
+    if args['sst_enabled']: # Single sample test
+        logger.info(f'Loading single-sample dataset {args["dataset"]}...')
+        data_te = util.Single_Sample_Dataset.get_test_set(
+            test_dataset = args['sst_test_dataset'], 
+            fill_dataset = args['sst_fill_dataset'], 
+            dataset_llm = args['dataset_llm'],
+            shuffle = args['shuffle'],
+            sample_size = args['sample_size'],
+            train_ratio = args['dataset_train_ratio'],
+            test_type = args['sst_test_type'],
+            fill_type = args['sst_fill_type'],
+            test_ratio = args['sst_true_ratio'],
+            device = args['device'],
+            sample_count = args['sample_count'],
         )
         logger.info(f'Loaded dataset with test size {len(data_te)}...')
-    else: # Single sample test
-        logger.info(f'Loading single-sample dataset {args["dataset"]}...')
-        data_te = util.get_single_sample_datset(
+        
+        if args['sst_strong_enabled']: # Stronger single sample test (requiring two different sets)
+            logger.info(f'Loading complimentry single-sample dataset {args["dataset"]}...')
+            data_te_comp = util.Single_Sample_Dataset.get_test_set(
+                test_dataset = args['sst_test_dataset'], 
+                fill_dataset = args['sst_fill_dataset'], 
+                dataset_llm=args['dataset_llm'],
+                shuffle=args['shuffle'],
+                sample_size=args['sample_size'],
+                train_ratio=args['dataset_train_ratio'],
+                test_type=args['sst_test_type'],
+                fill_type='human' if args['sst_fill_type'] == 'machine' else 'machine',
+                test_ratio=args['sst_true_ratio'],
+                device=args['device'],
+                sample_count=args['sample_count'],
+            )
+            logger.info(f'Loaded dataset with test size {len(data_te)}...')
+    else: # Normal two sample test
+        logger.info(f'Loading two-sample dataset {args["dataset"]}...')
+        _, data_te = util.Two_Sample_Dataset.get_train_test_set(
             dataset=args['dataset'],
             dataset_llm=args['dataset_llm'],
-            train_ratio=args['dataset_train_ratio'],
             shuffle=args['shuffle'],
+            train_ratio=args['dataset_train_ratio'],
+            s1_type=args['s1_type'],
+            s2_type=args['s2_type'],
+            sample_size_train=args['sample_size'],
             sample_size_test=args['sample_size'],
-            test_type=args['single_sample_type'],
-            fill_type=args['single_sample_fill_type'],
-            test_ratio=args['single_sample_proportion'],
+            device=args['device'],
+            sample_count_test=args['sample_count'],
         )
         logger.info(f'Loaded dataset with test size {len(data_te)}...')
 
     # Set up DK-TST
     logger.info(f'Loading model...')
     model_path = os.path.join(args['model_dir'], args['model_name'])
-    hidden_multi = util.Training_Config_Handler.get_train_config(model_path)['hidden_multi']
+    train_config = util.Training_Config_Handler.get_train_config(model_path)
     dktst = DKTST(
-        latent_size_multi=hidden_multi,
+        latent_size_multi=train_config['hidden_multi'],
         device=args['device'],
-        dtype=args['dtype'],
+        dtype=util.str_to_dtype(train_config['dtype']),
         logger=logger
     )
     
     # Load checkpoint epoch
-    best_chkpnt_file_name = None
+    target_file_name = None
     chkpnt_file_names = os.listdir(model_path)
     for n in chkpnt_file_names:
-        if n.startswith('model_best'):
-            best_chkpnt_file_name = n
-    if not best_chkpnt_file_name: raise Exception("Did not find the best checkpoint in the model.")
-            
-    dktst.load(os.path.join(model_path, best_chkpnt_file_name))
-    logger.info(f"Using best checkpoint file: {best_chkpnt_file_name}")
+        if not args['chkpnt_epoch'] and n.startswith('model_best'):
+            target_file_name = n
+        elif args['chkpnt_epoch']:
+            r = re.match(r"model_ep_(\d+).pth", n)
+            if r and int(r.group(1)) == args['chkpnt_epoch']:
+                target_file_name = n
+    if not target_file_name: raise Exception(f"Did not find the checkpoint ({'best' if not args['chkpnt_epoch'] else args['chkpnt_epoch']}) in the model.")
+    dktst.load(os.path.join(model_path, target_file_name))
+    logger.info(f"Using best checkpoint file: {target_file_name}")
     
     log_testing_parameters(args, logger)
     
     # Start testing
-    test_power, threshold_avg, mmd_avg = dktst.test(
-        data=data_te,
-        perm_cnt=args['perm_cnt'],
-        sig_lvl=args['sig_lvl'],
-        seed=args['seed']
-    )
+    if args['sst_enabled'] and args['sst_strong_enabled']: # Strong single-sample test requires additional procedure
+        test_power = dktst.strong_single_sample_test(
+            data=data_te,
+            data_comp=data_te_comp,
+            perm_cnt=args['perm_cnt'],
+            sig_lvl=args['sig_lvl'],
+            seed=args['seed']
+        )
+        test_threshold_mean = None
+        test_mmd_mean = None
+    else: # Normal two sample test and single sample test
+        test_power, test_thresholds, test_mmds = dktst.test(
+            data=data_te,
+            perm_cnt=args['perm_cnt'],
+            sig_lvl=args['sig_lvl'],
+            seed=args['seed']
+        )
+        test_threshold_mean = test_thresholds.mean()
+        test_mmd_mean = test_mmds.mean()
     
     # Logging of test results
     logger.info(
         f"Testing finished with:\n"
         f"{test_power=}\n"
-        f"{threshold_avg=}\n"
-        f"{mmd_avg=}\n"
+        f"{test_threshold_mean=}\n"
+        f"{test_mmd_mean=}\n"
     )
     
-    return test_power, threshold_avg, mmd_avg, len(data_te)
-
+    return test_power, test_threshold_mean, test_mmd_mean, len(data_te)
     
-def perform_batch_test(args, logger):
+def perform_batch_test_aux(
+                       args, 
+                       logger,
+                       dataset_tr_list,
+                       dataset_llm_tr_list,
+                       s1s2_tr_list,
+                       shuffle_tr_list,
+                       linear_size_list,
+                       epoch_list,
+                       sample_size_tr_list,
+                       seed_tr_list,
+                       lr_list,
+                       chkpnt_ep_list,
+                       dataset_te_list,
+                       dataset_llm_te_list,
+                       s1s2_te_list,
+                       shuffle_te_list,
+                       sample_size_te_list,
+                       sig_lvl_list,
+                       perm_cnt_list,
+                       seed_te_list,
+                       sst_enabled_list,
+                       sst_test_dataset_list,
+                       sst_fill_dataset_list,
+                       sst_type_list,
+                       sst_true_ratio_list,
+                       sst_strong_enabled_list,
+                       ):
         logger.info("=========== Starting batch test ===========")
-        
-        # Models' parameters, used to load the trained model.
-        # Default assume the use of the latest trained model if multiple ones exist for a configuration
-        dataset_tr_list = ['TruthfulQA']
-        dataset_llm_tr_list = ['ChatGPT']
-        s1s2_tr_list = ['hm']
-        shuffle_tr_list = [False] # [True, False]
-        linear_size_list = [5] # [3, 5]
-        epoch_list = [10000]
-        sample_size_tr_list = [2000]
-        seed_tr_list = [1103]
-        
-        # Testing parameters
-        dataset_te_list = ['SQuAD1', 'TruthfulQA', 'NarrativeQA']
-        dataset_llm_te_list = ['ChatGPT']
-        s1s2_te_list = ['hm'] # ['hm', 'hh', 'mm']
-        shuffle_te_list = [True] # [True, False]
-        sample_size_te_list = [20] # [20, 10, 5, 4, 3]
-        sig_lvl_list = [0.05]
-        perm_cnt_list = [200] # [20, 50, 100, 200, 400]
-        seed_te_list = [1103]
-        single_sample_test_list = [True] # 
-        single_sample_test_type_list = ['hm', 'mh', 'hh', 'mm'] # ['hm', 'hh', 'mm']
-        single_sample_proportion_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9] # [0.2, 0.5, 0.8]
         
         # Calculate number of tests
         test_count = (
@@ -128,6 +173,8 @@ def perform_batch_test(args, logger):
             * len(epoch_list)
             * len(sample_size_tr_list)
             * len(seed_tr_list)
+            * len(lr_list)
+            * len(chkpnt_ep_list)
             * len(dataset_te_list)
             * len(dataset_llm_te_list)
             * len(sig_lvl_list)
@@ -136,9 +183,12 @@ def perform_batch_test(args, logger):
             * len(s1s2_te_list)
             * len(sample_size_te_list)
             * len(seed_te_list)
-            * len(single_sample_test_list)
-            * len(single_sample_test_type_list)
-            * len(single_sample_proportion_list)
+            * len(sst_enabled_list)
+            * len(sst_test_dataset_list)
+            * len(sst_fill_dataset_list)
+            * len(sst_type_list)
+            * len(sst_true_ratio_list)
+            * len(sst_strong_enabled_list)
         )
         
         # Iterate through model parameters
@@ -154,7 +204,9 @@ def perform_batch_test(args, logger):
                 lin_size, 
                 epoch, 
                 sample_size_tr, 
-                seed_tr
+                seed_tr,
+                lr,
+                chkpnt_ep,
                 ) in itertools.product(
                     dataset_tr_list, 
                     dataset_llm_tr_list, 
@@ -163,11 +215,12 @@ def perform_batch_test(args, logger):
                     linear_size_list, 
                     epoch_list, 
                     sample_size_tr_list, 
-                    seed_tr_list):
+                    seed_tr_list,
+                    lr_list,
+                    chkpnt_ep_list):
                     
-                # Find the lateset version of the checkpoint with this set of parameters
-                model_prefix = f"{data_tr}_{s1s2_tr}_{'s' if shuffle_tr else 'nos'}_{lin_size}_{epoch}_{sample_size_tr}_{seed_tr}"
-                
+                # Find the lateset version of the model with this set of parameters
+                model_prefix = f"{data_tr}_{data_llm_tr}_{s1s2_tr}_{'s' if shuffle_tr else 'nos'}_{lin_size}_{epoch}_{sample_size_tr}_{seed_tr}_{lr:.0e}"
                 id_max = 0
                 for n in model_names:
                     if n.startswith(model_prefix):
@@ -177,7 +230,6 @@ def perform_batch_test(args, logger):
                 if id_max == 0:
                     logger.error(f"A model cannot be found for the configuration {model_prefix}, its test will be skipped.")
                     continue
-                
                 model_name = f"{model_prefix}_{str(id_max)}"
                 
                 # Iterate through testing parameters
@@ -190,9 +242,12 @@ def perform_batch_test(args, logger):
                     s1s2_te, 
                     sample_size_te, 
                     seed_te,
-                    sst_te,
+                    sst_enabled_te,
+                    sst_test_dataset_te,
+                    sst_fill_dataset_te,
                     sst_type_te,
-                    sst_proportion_te,
+                    sst_true_ratio_te,
+                    sst_strong_te,
                     ) in itertools.product(
                         dataset_te_list, 
                         dataset_llm_te_list, 
@@ -202,9 +257,12 @@ def perform_batch_test(args, logger):
                         s1s2_te_list, 
                         sample_size_te_list, 
                         seed_te_list,
-                        single_sample_test_list,
-                        single_sample_test_type_list,
-                        single_sample_proportion_list):
+                        sst_enabled_list,
+                        sst_test_dataset_list,
+                        sst_fill_dataset_list,
+                        sst_type_list,
+                        sst_true_ratio_list,
+                        sst_strong_enabled_list,):
                         
                     str2type = lambda s : 'human' if s == 'h' else 'machine'
                     s1 = str2type(s1s2_te[0])
@@ -212,24 +270,29 @@ def perform_batch_test(args, logger):
                     sst_test_type = str2type(sst_type_te[0])
                     sst_fill_type = str2type(sst_type_te[1])
 
-                    new_args = copy(args)
+                    new_args = copy.copy(args)
                     new_args['model_name'] = model_name
+                    new_args['chkpnt_epoch'] = chkpnt_ep
                     new_args['dataset'] = data_te
                     new_args['dataset_llm'] = data_llm_te
-                    new_args['dataset_train_ratio'] = 0.8 if data_tr == data_te else 0.3
+                    new_args['dataset_train_ratio'] = 0.8 if data_tr == data_te else 0.3 # Use more data for testing if the dataset was not used for training
                     new_args['s1_type'] = s1
                     new_args['s2_type'] = s2
                     new_args['shuffle'] = shuffle_te
                     new_args['perm_cnt'] = perm_cnt
                     new_args['sig_lvl'] = sig_lvl
                     new_args['sample_size'] = sample_size_te
+                    new_args['sample_count'] = 20
                     new_args['seed'] = seed_te
-                    new_args['single_sample_test'] = sst_te
-                    new_args['single_sample_type'] = sst_test_type
-                    new_args['single_sample_fill_type'] = sst_fill_type
-                    new_args['single_sample_proportion'] = sst_proportion_te
+                    new_args['sst_enabled'] = sst_enabled_te
+                    new_args['sst_test_dataset'] = sst_test_dataset_te
+                    new_args['sst_fill_dataset'] = sst_fill_dataset_te
+                    new_args['sst_test_type'] = sst_test_type
+                    new_args['sst_fill_type'] = sst_fill_type
+                    new_args['sst_true_ratio'] = sst_true_ratio_te
+                    new_args['sst_strong_enabled'] = sst_strong_te
                     
-                    test_power, threshold_avg, mmd_avg, test_size = get_test_result(args=new_args, logger=logger)
+                    test_power, threshold_mean, mmd_mean, test_size = get_test_result(args=new_args, logger=logger)
                     
                     results.append({ # Add each result row as a dict into a list of rows
                         'Train - Model Name': model_name,
@@ -240,6 +303,9 @@ def perform_batch_test(args, logger):
                         'Train - Shuffled': shuffle_tr,
                         'Train - Epoch Count': epoch,
                         'Train - Sample Size': sample_size_tr,
+                        'Train - Learning Rate': lr,
+                        'Train - Checkpoint Epoch': chkpnt_ep,
+                        'Train - Seed': seed_tr,
                         'Test - Dataset Name': data_te,
                         'Test - Dataset LLM Name': data_llm_te,
                         'Test - S1 S2 Type': s1s2_te,
@@ -249,13 +315,16 @@ def perform_batch_test(args, logger):
                         'Test - Sample Size': sample_size_te,
                         'Test - Seed': seed_te,
                         'Test - Test Size': test_size,
-                        'Test - Single Sample Test': sst_te,
-                        'Test - Single Sample Test Type': sst_test_type,
-                        'Test - Single Sample Fill Type': sst_fill_type,
-                        'Test - Single Sample Proportion': sst_proportion_te,
+                        'Test - SST Enabled': sst_enabled_te,
+                        'Test - SST Test Dataset': sst_test_dataset_te,
+                        'Test - SST Fill Dataset': sst_fill_dataset_te,
+                        'Test - SST Test Type': sst_test_type,
+                        'Test - SST Fill Type': sst_fill_type,
+                        'Test - SST True Data Ratio': sst_true_ratio_te,
+                        'Test - SST Strong Enabled': sst_strong_te,
                         'Result - Test Power': test_power,
-                        'Result - Threshold (Avg.)': threshold_avg,
-                        'Result - MMD (Avg.)': mmd_avg})
+                        'Result - Threshold Mean': threshold_mean,
+                        'Result - MMD Mean': mmd_mean})
                     
                     pbar.update(1) # Update progress bar
         
@@ -263,13 +332,55 @@ def perform_batch_test(args, logger):
         results_df = pd.DataFrame(results)
         return results_df
     
-def output_df_to_csv_file(df, start_time_str, logger, dir="./test_logs/"):
-    save_file_path = os.path.join(dir, f'test_{start_time_str}.csv')
-    df.to_csv(save_file_path)
-    logger.info(
-        f"Batch test result saved to {save_file_path}\n"
-        "=========== Batch test finished ===========\n")
+    
+def perform_batch_test(args, logger):
+      
+    batch_start_time_str = util.get_current_time_str()
+    result_df = perform_batch_test_aux(
+        args=args, 
+        logger=logger,
         
+        # Models' parameters, used to load the trained model.
+        # Default assume the use of the latest trained model if multiple ones exist for a configuration
+        dataset_tr_list=['TruthfulQA'],
+        dataset_llm_tr_list=['ChatGPT'],
+        s1s2_tr_list = ['hm'],
+        shuffle_tr_list = [False],
+        linear_size_list = [3], # [3, 5]
+        epoch_list = [3000],
+        sample_size_tr_list = [20],
+        seed_tr_list = [1103],
+        lr_list = [5e-05], # [5e-05, 1e-03]
+        chkpnt_ep_list = [None], # [500,1000,2000,3000,4000,5000,6000,7000,8000,9000]
+        
+        # Shared testing parameters
+        dataset_llm_te_list = ['ChatGPT'], # ['ChatGPT', 'ChatGLM', 'Dolly', 'ChatGPT-turbo', 'GPT4', 'StableLM']
+        shuffle_te_list = [False], # [True, False]
+        sample_size_te_list = [10], # [20, 10, 5, 4, 3]
+        sig_lvl_list = [0.05],
+        perm_cnt_list = [200], # [20, 50, 100, 200, 400]
+        seed_te_list = [1104],
+        
+        # Two Sample Test only parameters
+        dataset_te_list = ['TruthfulQA'], # ['SQuAD1', 'TruthfulQA', 'NarrativeQA']
+        s1s2_te_list = ['hh'], # ['hm', 'hh', 'mm']
+        
+        # Single Sample Test only parameters (Will not run TST if SST is enabled)
+        sst_enabled_list = [True],
+        sst_test_dataset_list = ['NarrativeQA'], # ['SQuAD1', 'TruthfulQA', 'NarrativeQA']
+        sst_fill_dataset_list = ['NarrativeQA'], # ['SQuAD1', 'TruthfulQA', 'NarrativeQA']
+        sst_type_list = ['hm', 'hh', 'mm'], # ['hm', 'hh', 'mm']
+        sst_true_ratio_list = [1], # [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        sst_strong_enabled_list = [True],
+    )
+    if not args['debug']: # Save the result if not in debug mode
+        save_file_path = os.path.join('./test_logs', f'test_{batch_start_time_str}.csv')
+        result_df.to_csv(save_file_path)
+        logger.info(
+            f"Batch test result saved to {save_file_path}\n"
+            "=========== Batch test finished ===========\n")
+
+    
 def get_args():
     # Setup parser
     parser = ArgumentParser()
@@ -284,7 +395,8 @@ def get_args():
     parser.add_argument('--batch_test', default=False, action='store_true')
     
     # Model Parameters
-    parser.add_argument('--model_name', type=str)
+    parser.add_argument('--model_name', type=str) # Model name you want to load
+    parser.add_argument('--chkpnt_epoch', type=int) # Model checkpoint you want to load, if left out, the best checkpoint will be loaded
     
     # Test Paramters
     parser.add_argument('--dataset', '-d', type=str, default='SQuAD1') # TruthfulQA, SQuAD1, NarrativeQA
@@ -295,17 +407,21 @@ def get_args():
     parser.add_argument('--shuffle', default=False, action='store_true') # Shuffle make sure each pair of s1, s2 samples do not correspond to the same question
     parser.add_argument('--perm_cnt', '-pc', type=int, default=200)
     parser.add_argument('--sig_lvl', '-a', type=float, default=0.05)
-    parser.add_argument('--sample_size', '-bte', type=int, default=20)
+    parser.add_argument('--sample_size', '-ss', type=int, default=20)
+    parser.add_argument('--sample_count', '-sc', type=int, default=50)
     parser.add_argument('--seed', '-s', type=int, default=1102) # dimension of samples (default value is 10)
     
     # Single Set Test Parameters
     '''Single Sample Test represent the situation when you only have some sample written by either human or machine, but you
     do not know which. In this case, two sample batches (or sets) are created by putting the data in one of the sample set, 
     and fill the rest of the data with traininig (seen) data of a single type (either human or machine written).''' 
-    parser.add_argument('--single_sample_test', default=False, action='store_true')
-    parser.add_argument('--single_sample_type', type=str) # Type of data (human or machine)
-    parser.add_argument('--single_sample_fill_type', type=str) # Type of data (human or machine)
-    parser.add_argument('--single_sample_proportion', type=float) # Proportion of single set data in a test batch
+    parser.add_argument('--sst_enabled', default=False, action='store_true') # Whether to enable single sample test
+    parser.add_argument('--sst_test_dataset', type=str) # Dataset used for test data
+    parser.add_argument('--sst_fill_dataset', type=str) # Dataset used for fill data
+    parser.add_argument('--sst_test_type', type=str) # Type of data (human or machine)
+    parser.add_argument('--sst_fill_type', type=str) # Type of data (human or machine)
+    parser.add_argument('--sst_true_ratio', type=float) # Ratio of true data in a single sample set
+    parser.add_argument('--sst_strong_enabled', default=False, action='store_true') # Whether to enable strong single sample test (requiring two different sets)
     
     args = parser.parse_args()
     
@@ -326,14 +442,10 @@ def main():
         is_debug=args['debug']
     )
     
-    util.setup_seeds(args['seed'])
-    
     if args['batch_test']:
-        result_df = perform_batch_test(args=args, logger=logger)
-        if not args['debug']:
-            output_df_to_csv_file(df=result_df, start_time_str=start_time_str, logger=logger)
+        perform_batch_test(args=args, logger=logger)
     else:
-        _, _, _, _ = get_test_result(args=args, logger=logger)
+        _, _, _, _, _ = get_test_result(args=args, logger=logger)
         
 if __name__ == "__main__":
     main()

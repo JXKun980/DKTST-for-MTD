@@ -167,6 +167,7 @@ test_logs/
 analysis_logs/
 archive/
 .vscode/
+training_setups/
 
 todo.txt
 temp.py

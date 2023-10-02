@@ -6,7 +6,7 @@ import re
 
 # LLMs to choose from
 # ChatGPT
-# BloomZ
+# BloomZ (Low data amount!)
 # ChatGLM
 # Dolly
 # ChatGPT-turbo

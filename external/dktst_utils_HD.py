@@ -119,6 +119,35 @@ def MMDu(Fea, len_s, Fea_org, sigma, sigma0=0.1, epsilon = 10**(-10), is_smooth=
 
     return h1_mean_var_gram(Kx, Ky, Kxy, is_var_computed, use_1sample_U)
 
+def Kernels_for_MMDu(Fea, len_s, Fea_org, sigma, sigma0=0.1, epsilon = 10**(-10), is_smooth=True, is_var_computed=True, use_1sample_U=True):
+    """compute value of deep-kernel MMD and std of deep-kernel MMD using merged data."""
+    X = Fea[0:len_s, :] # fetch the sample 1 (features of deep networks)
+    Y = Fea[len_s:, :] # fetch the sample 2 (features of deep networks)
+    X_org = Fea_org[0:len_s, :] # fetch the original sample 1
+    Y_org = Fea_org[len_s:, :] # fetch the original sample 2
+    L = 1 # generalized Gaussian (if L>1)
+
+    nx = X.shape[0]
+    ny = Y.shape[0]
+    Dxx = Pdist2(X, X)
+    Dyy = Pdist2(Y, Y)
+    Dxy = Pdist2(X, Y)
+    Dxx_org = Pdist2(X_org, X_org)
+    Dyy_org = Pdist2(Y_org, Y_org)
+    Dxy_org = Pdist2(X_org, Y_org)
+    K_Ix = torch.eye(nx).cuda()
+    K_Iy = torch.eye(ny).cuda()
+    if is_smooth:
+        Kx = (1-epsilon) * torch.exp(-(Dxx / sigma0)**L -Dxx_org / sigma) + epsilon * torch.exp(-Dxx_org / sigma)
+        Ky = (1-epsilon) * torch.exp(-(Dyy / sigma0)**L -Dyy_org / sigma) + epsilon * torch.exp(-Dyy_org / sigma)
+        Kxy = (1-epsilon) * torch.exp(-(Dxy / sigma0)**L -Dxy_org / sigma) + epsilon * torch.exp(-Dxy_org / sigma)
+    else:
+        Kx = torch.exp(-Dxx / sigma0)
+        Ky = torch.exp(-Dyy / sigma0)
+        Kxy = torch.exp(-Dxy / sigma0)
+
+    return Kx, Ky, Kxy
+
 def MMDu_linear_kernel(Fea, len_s, is_var_computed=True, use_1sample_U=True):
     """compute value of (deep) lineaer-kernel MMD and std of (deep) lineaer-kernel MMD using merged data."""
     try:
