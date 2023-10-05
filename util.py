@@ -171,7 +171,7 @@ class Two_Sample_Dataset(Dataset):
         return new_self
     
     def get_train_test_set(
-            dataset: 'list[str]', 
+            datasets: 'list[str]', 
             dataset_llm: str,
             shuffle: bool, 
             train_ratio: float,
@@ -184,36 +184,49 @@ class Two_Sample_Dataset(Dataset):
             ):
         '''Constructor function that construct train and test sets from arguments'''
 
-        (human_tr, 
-        human_te, 
-        machine_tr, 
-        machine_te) = Two_Sample_Dataset.get_human_machine_datalist(
-            dataset=dataset,
-            dataset_llm=dataset_llm,
-            shuffle=shuffle,
-            train_ratio=train_ratio
-        )
+        data_s1_tr_aggregated = np.array([])
+        data_s2_tr_aggregated = np.array([])
+        data_s1_te_aggregated = np.array([])
+        data_s2_te_aggregated = np.array([])
         
-        data_s1_tr = copy.deepcopy(human_tr) if s1_type == 'human' else copy.deepcopy(machine_tr)
-        data_s2_tr = copy.deepcopy(human_tr) if s2_type == 'human' else copy.deepcopy(machine_tr)
-        data_s1_te = copy.deepcopy(human_te) if s1_type == 'human' else copy.deepcopy(machine_te)
-        data_s2_te = copy.deepcopy(human_te) if s2_type == 'human' else copy.deepcopy(machine_te)
-        if s1_type == s2_type:
-            random.shuffle(data_s1_tr)
-            random.shuffle(data_s2_tr)
-            random.shuffle(data_s1_te)
-            random.shuffle(data_s2_te)
+        for dataset in datasets:
+            (human_tr, 
+            human_te, 
+            machine_tr, 
+            machine_te) = Two_Sample_Dataset.get_human_machine_datalist(
+                dataset=dataset,
+                dataset_llm=dataset_llm,
+                shuffle=shuffle,
+                train_ratio=train_ratio
+            )
+            
+            data_s1_tr = copy.deepcopy(human_tr) if s1_type == 'human' else copy.deepcopy(machine_tr)
+            data_s2_tr = copy.deepcopy(human_tr) if s2_type == 'human' else copy.deepcopy(machine_tr)
+            data_s1_te = copy.deepcopy(human_te) if s1_type == 'human' else copy.deepcopy(machine_te)
+            data_s2_te = copy.deepcopy(human_te) if s2_type == 'human' else copy.deepcopy(machine_te)
+            if s1_type == s2_type:
+                random.shuffle(data_s1_tr)
+                random.shuffle(data_s2_tr)
+                random.shuffle(data_s1_te)
+                random.shuffle(data_s2_te)
+
+            # Concatenate data from different datasets, select only a portion of the data if multiple datasets are used
+            # Even though data from different datasets are concatenated, the data will be shuffled during training
+            data_s1_tr_aggregated = np.concatenate((data_s1_tr_aggregated, data_s1_tr[:len(data_s1_tr)//len(datasets)]))
+            data_s2_tr_aggregated = np.concatenate((data_s2_tr_aggregated, data_s2_tr[:len(data_s1_tr)//len(datasets)]))
+            data_s1_te_aggregated = np.concatenate((data_s1_te_aggregated, data_s1_te[:len(data_s1_te)//len(datasets)]))
+            data_s2_te_aggregated = np.concatenate((data_s2_te_aggregated, data_s2_te[:len(data_s1_te)//len(datasets)]))
         
         data_tr = Two_Sample_Dataset(
-            data_s1=data_s1_tr,
-            data_s2=data_s2_tr,
+            data_s1=data_s1_tr_aggregated,
+            data_s2=data_s2_tr_aggregated,
             device=device,
             sample_size=sample_size_train,
             sample_count=None
         )
         data_te = Two_Sample_Dataset(
-            data_s1=data_s1_te,
-            data_s2=data_s2_te,
+            data_s1=data_s1_te_aggregated,
+            data_s2=data_s2_te_aggregated,
             device=device,
             sample_size=sample_size_test,
             sample_count=sample_count_test
@@ -225,68 +238,60 @@ class Single_Sample_Dataset(Dataset):
     The aim of this dataset is only for testing the single-sample capability of trained DKTST-for-MTDs
     
     To get the fill data, the training data set is randomly sampled.
-    
-    Returns: 
-        s1: Contains the test data with some fill data to fill to the "sample size"
-            The amount of test data s1 contains is specified by the test_ratio parameter between 0 and 1.
-        s2: Contains only fill data of size "sample_size"
     '''
     def __init__(self, 
-                 data_test: 'list[str]', 
+                 data_user: 'list[str]', 
                  data_fill: 'list[str]', 
-                 test_ratio: float,
+                 true_ratio: float,
                  device,
                  sample_size: int,
                  sample_count: int = None
                  ) -> None:
         # Input validation
-        assert 0 < test_ratio <= 1, "Test data ratio must be in range (0, 1]"
+        assert 0 < true_ratio <= 1, "Test data ratio must be in range (0, 1]"
         
         super().__init__(
             device = device, 
             sample_size = sample_size,
-            dataset_size = len(data_test),
+            dataset_size = len(data_user),
             sample_count = sample_count
             )
         
-        self.data_test = np.array(data_test)
+        self.data_user = np.array(data_user)
         self.data_fill = np.array(data_fill)
-        self.test_ratio = test_ratio
-        self.sample_test_size = round(sample_size * test_ratio)
+        self.true_ratio = true_ratio
+        self.sample_true_size = round(sample_size * true_ratio)
     
     def __iter__(self):
         def data_generator():
             '''Generator closure function that act as iterator that produce samples by randomly sampling data'''
-            sample_cnt = copy.copy(self.sample_count)
-            sample_size = copy.copy(self.sample_size)
-            sample_test_size = copy.copy(self.sample_test_size)
             device = copy.copy(self.device)
             
-            data_test_tensor = torch.from_numpy(self.data_test).to(device)
+            data_user_tensor = torch.from_numpy(self.data_user).to(device)
             data_fill_tensor = torch.from_numpy(self.data_fill).to(device)
 
-            test_size = data_test_tensor.shape[0]
+            user_size = data_user_tensor.shape[0]
             fill_size = data_fill_tensor.shape[0]
-            unique_test_sample_cnt = test_size // sample_test_size
+            unique_user_sample_cnt = user_size // self.sample_true_size
             
             # Random permute test data
-            rand_index = torch.randperm(test_size, device=device)
-            data_test_tensor = data_test_tensor[rand_index]
+            rand_index = torch.randperm(user_size, device=device)
+            data_user_tensor = data_user_tensor[rand_index]
             
             i = 0
-            for _ in range(sample_cnt):
-                if i >= unique_test_sample_cnt: # run out of unique data, reshuffle and restart random sampling
+            for _ in range(self.sample_cnt):
+                if i >= unique_user_sample_cnt: # run out of unique data, reshuffle and restart random sampling
                     i = 0
                     # Random permute test data
-                    rand_index = torch.randperm(test_size, device=device)
-                    data_test_tensor = data_test_tensor[rand_index]
+                    rand_index = torch.randperm(user_size, device=device)
+                    data_user_tensor = data_user_tensor[rand_index]
                 # Construct s1 and s2 from random shuffled test data and train data
-                s1_fill_size = sample_size - sample_test_size
+                s1_fill_size = self.sample_size - self.sample_true_size
                 s1s2_fill_mask = torch.randperm(fill_size, device=device)
                 s1_fill_mask = s1s2_fill_mask[:s1_fill_size]
-                s2_fill_mask = s1s2_fill_mask[s1_fill_size:s1_fill_size+sample_size]
+                s2_fill_mask = s1s2_fill_mask[s1_fill_size:s1_fill_size+self.sample_size]
                 
-                s1_tensor = torch.cat((data_test_tensor[i*sample_test_size : (i+1)*sample_test_size], data_fill_tensor[s1_fill_mask]), 0)
+                s1_tensor = torch.cat((data_user_tensor[i*self.sample_true_size : (i+1)*self.sample_true_size], data_fill_tensor[s1_fill_mask]), 0)
                 s2_tensor = data_fill_tensor[s2_fill_mask]
                 
                 yield (s1_tensor, s2_tensor)
@@ -296,26 +301,26 @@ class Single_Sample_Dataset(Dataset):
     
     def copy_and_map(self, f):
         new_self = copy.copy(self)
-        new_self.data_test = f(copy.deepcopy(self.data_test))
+        new_self.data_user = f(copy.deepcopy(self.data_user))
         new_self.data_fill = f(copy.deepcopy(self.data_fill))
         return new_self
     
     def get_test_set(
-        test_dataset: str, 
+        user_dataset: str, 
         fill_dataset: str,
         dataset_llm: str,
         shuffle: bool,
         train_ratio: float,
-        test_type: str,
+        user_type: str,
         fill_type: str,
-        test_ratio: float,
+        true_ratio: float,
         sample_size: str,
         device,
         sample_count: int = None,
         ):
 
         _, human_test, _, machine_test = Single_Sample_Dataset.get_human_machine_datalist(
-            dataset=test_dataset,
+            dataset=user_dataset,
             dataset_llm=dataset_llm,
             shuffle=shuffle,
             train_ratio=train_ratio
@@ -329,9 +334,9 @@ class Single_Sample_Dataset(Dataset):
         ) # Only get the training split for the fill data
         
         data = Single_Sample_Dataset(
-            data_test = copy.deepcopy(human_test) if test_type == 'human' else copy.deepcopy(machine_test),
+            data_user = copy.deepcopy(human_test) if user_type == 'human' else copy.deepcopy(machine_test),
             data_fill = copy.deepcopy(human_fill) if fill_type == 'human' else copy.deepcopy(machine_fill),
-            test_ratio=test_ratio,
+            true_ratio=true_ratio,
             device=device,
             sample_size=sample_size,
             sample_count=sample_count,

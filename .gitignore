@@ -168,6 +168,7 @@ analysis_logs/
 archive/
 .vscode/
 training_setups/
+scratch/
 
 todo.txt
 temp.py
