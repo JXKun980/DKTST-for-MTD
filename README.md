@@ -33,7 +33,7 @@ If not installed, install build-essential for linux
 apt install build-essential -y
 ```
 
-Create conda enviornment
+Create conda enviornment (Can take a while)
 ```bash
 conda env create -f environment.yml
 ```
