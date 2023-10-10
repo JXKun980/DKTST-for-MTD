@@ -132,6 +132,7 @@ optional arguments:
 ```
 
 Example
+
 ```bash
 python train.py --datasets TruthfulQA
 ```
@@ -193,6 +194,7 @@ optional arguments:
 ```
 
 Example
+
 Given a trained model at `/models/TruthfulQA_ChatGPT_hm_nos_3_3000_20_1103_5e-05_20230919072909/`, rename the checkpoint `model_ep_1500.pth` to `model_best_ep_1500.pth`, so running `test.py` do not need you to specify the epoch of the checkpoint to test every time.
 ```bash
 python test.py --model_name TruthfulQA_ChatGPT_hm_nos_3_3000_20_1103_5e-05_20230919072909 --test_type TST --tst_datasets TruthfulQA
@@ -225,6 +227,7 @@ optional arguments:
 ```
 
 Example
+
 Given a test result CSV file at `/test_logs/test_20231009082130.csv`, use:
 ```bash
 python analysis.py --csv_files test_20231009082130.csv --analysis_name tabular_shuffle
@@ -248,6 +251,7 @@ optional arguments:
 ```
 
 Example
+
 Given a trained model at `/models/TruthfulQA_ChatGPT_hm_nos_3_3000_20_1103_5e-05_20230919072909/`
 ```bash
 python scripts/save_training_graph_to_png.py --model_names TruthfulQA_ChatGPT_hm_nos_3_3000_20_1103_5e-05_20230919072909
