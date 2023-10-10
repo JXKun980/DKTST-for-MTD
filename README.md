@@ -43,7 +43,7 @@ Activate conda environment
 conda acitvate DKTST-for-MTD
 ```
 
-Download Dataset files from [Google Drive link](https://drive.google.com/drive/folders/1p4iBeM4r-sUKe8TnS4DcYlxvQagcmola) sourced from [MGTBench](https://github.com/xinleihe/MGTBench), and place them into DKTST-for-MTD/datasets/ folder.
+Download Dataset files from [Google Drive link](https://drive.google.com/drive/folders/1p4iBeM4r-sUKe8TnS4DcYlxvQagcmola) sourced from [MGTBench](https://github.com/xinleihe/MGTBench), and place them into `DKTST-for-MTD/datasets/` folder.
 
 ## Code Structure
 
