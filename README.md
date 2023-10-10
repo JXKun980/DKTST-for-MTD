@@ -55,7 +55,7 @@ DKTST-for-MTD
 │   └── TruthfulQA_LLMs.csv
 ├── models
 │   └── model_name
-|       ├── checkpoints.pth
+│       ├── checkpoints.pth
 │       └── training_config.yml
 ├── analysis_logs
 ├── test_logs
