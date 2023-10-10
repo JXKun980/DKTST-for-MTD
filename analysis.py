@@ -1,37 +1,48 @@
-import os
-import itertools as it
 import abc
-from argparse import ArgumentParser
+import itertools as it
+import os
 
-import pandas as pd
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from simple_parsing import ArgumentParser
 
 from external.dataset_loader import DATASETS
 import util
 
-DATA_PATH = './test_logs/'
-S1S2 = (('hh', 'mm'), ('hm', 'mh'))
-DEBUG = True
+###########################################
+# Tabular Analysis
+###########################################
 
-
-class Analysis(abc.ABC):
-    def __init__(self, df, datasets_included: 'list[str]' = [[d] for d in DATASETS]):
-        self.datasets_included = datasets_included
+class TabularAnalysis(abc.ABC):
+    description = None
+    
+    def __init__(self, df):
+        df = df.drop(columns=df.columns[0])
         self.df = df
+        
+        # Shared row indices
+        self.row_indices = pd.MultiIndex.from_product(
+            iterables = (
+                ['Aggregated']+DATASETS,
+                ('Type 1', 'Type 2'), 
+                ('Mean', 'Std.')
+            ),
+            names = ('Database', 'Test Type', 'Test Power')
+        )
         
     def aggregate_numpy_all_datasets(self, analysis_fun):
         '''Get analysis result for each database and a result for the aggregated data, combine the results horizontally.'''
-        if len(self.datasets_included) < 1: raise ValueError("Database list must at least contain one dataset")
-        
         # Get result for each database, and then concatenate together in axis 1.
         result = None
-        for ds in self.datasets_included:
-            result_ds = analysis_fun(self.df[self.df.te_tst_datasets == str(ds)])
-            result = np.concatenate((result, result_ds), axis=1) if result is not None else result_ds
+        for ds in self.df.te_tst_datasets.unique():
+            result_ds = analysis_fun(self.df[self.df.te_tst_datasets == ds])
+            result = np.concatenate((result, result_ds), axis=0) if result is not None else result_ds
             
         # Get result for the aggregated database
-        temp = analysis_fun(self.df)
-        result = np.concatenate((result, temp), axis=1)
+        aggregated_result = analysis_fun(self.df)
+        result = np.concatenate((aggregated_result, result), axis=0)
         return result
     
     @abc.abstractmethod
@@ -60,57 +71,45 @@ class Analysis(abc.ABC):
             )
         return result_df
 
-class Seed_Analysis(Analysis):
+class TabularAnalysisSeed(TabularAnalysis):
     description = 'Analysis for a model configuration different training seeds'
     
     def __init__(self, 
-                 df: pd.DataFrame, 
-                 datasets_included: 'list[str]' = [[d] for d in DATASETS], 
+                 df: pd.DataFrame,
                  seeds: 'list[int]' = None,
                  ):
-        super().__init__(df, datasets_included)
+        super().__init__(df)
         self.seeds = self.df.tr_seed.unique() if seeds is None else seeds
         
     def get_numpy_single_dataset(self, df: pd.DataFrame):
-        result = np.zeros((12, 1))
+        result = np.zeros((4, 3))
         for i, seed in enumerate(self.seeds):
             for j, s1s2 in enumerate(S1S2):
                 df_result = df[(df.tr_seed == seed) 
                     & (df.te_tst_s1s2_type.map(lambda x: x in s1s2))
                     ].test_power
-                result[4*i + 2*j, 0] = df_result.mean()
-                result[4*i + 2*j+1, 0] = df_result.std()
+                result[2*j, i] = df_result.mean()
+                result[2*j+1, i] = df_result.std()
         return result
     
     def get_df(self):
         result = self.get_numpy()
         df_result = pd.DataFrame(result,
-                    index=pd.MultiIndex.from_product(
-                        (
-                            self.seeds,
-                            ('Type 1', 'Type 2'), 
-                            ('Mean', 'Std.')
-                        ),
-                        names=(
-                            'Seeds',
-                            'Test Type',
-                            'Test Power'
-                        )),
-                    columns=pd.Index(
-                        data=DATASETS+['Aggregated'],  
-                        name=('Database')
+                    index = self.row_indices,
+                    columns = pd.Index(
+                        data = self.seeds,  
+                        name = 'Seeds'
                     ))
         return df_result
    
-class Shuffle_Analysis(Analysis):
+class TabularAnalysisShuffle(TabularAnalysis):
     description = 'Analysis for whether training and testing data are shuffled'
     
     def __init__(self, 
                  df: pd.DataFrame, 
-                 datasets_included: 'list[str]' = [[d] for d in DATASETS], 
                  shuffled_tr=(True, False), 
                  shuffled_te=(True, False)):
-        super().__init__(df, datasets_included)
+        super().__init__(df)
         self.shuffled_tr = shuffled_tr
         self.shuffled_te = shuffled_te
         
@@ -129,27 +128,22 @@ class Shuffle_Analysis(Analysis):
     def get_df(self):
         result = self.get_numpy()
         df_result = pd.DataFrame(result,
-                    index=pd.MultiIndex.from_product(
-                        (('Type 1', 'Type 2'), 
-                        ('Mean', 'Std.'))),
-                    columns=pd.MultiIndex.from_product(
+                    index = self.row_indices,
+                    columns = pd.MultiIndex.from_product(
                         (
-                            DATASETS+['Aggregated'], 
                             self.shuffled_tr, 
                             self.shuffled_te
-                        ), 
-                        names=('Database', 'Train Shuffled:', 'Test Shuffled:')
+                        )
                     ))
         return df_result
 
-class Linear_Size_Analysis(Analysis):
+class TabularAnalysisSize(TabularAnalysis):
     description = 'Analysis for linear layer size factor'
     
     def __init__(self, 
                  df: pd.DataFrame, 
-                 datasets_included: 'list[str]' = [[d] for d in DATASETS], 
                  lin_sizes: 'list[int]' = None):
-        super().__init__(df, datasets_included)
+        super().__init__(df)
         self.lin_sizes = self.df.tr_lin_size.unique() if lin_sizes is None else lin_sizes
         
     def get_numpy_single_dataset(self, df: pd.DataFrame):
@@ -167,26 +161,20 @@ class Linear_Size_Analysis(Analysis):
     def get_df(self):
         result = self.get_numpy()
         df_result = pd.DataFrame(result,
-                    index=pd.MultiIndex.from_product(
-                        (('Type 1', 'Type 2'), 
-                        ('Mean', 'Std.'))),
-                    columns=pd.MultiIndex.from_product(
-                        (
-                            DATASETS+['Aggregated'], 
-                            self.lin_sizes
-                        ), 
-                        names=('Database', 'Linear Size Multiple:')
+                    index = self.row_indices,
+                    columns = pd.Index(
+                        data = self.lin_sizes,
+                        name = 'Linear Size Multiple',
                     ))
         return df_result
 
-class Test_Sample_Size_Analysis(Analysis):
+class TabularAnalysisSampleSize(TabularAnalysis):
     description = 'Analysis for sample size during testing'
     
     def __init__(self, 
-                 df: pd.DataFrame, 
-                 datasets_included: 'list[str]' = [[d] for d in DATASETS], 
+                 df: pd.DataFrame,
                  sample_sizes: 'list[int]' = None):
-        super().__init__(df, datasets_included)
+        super().__init__(df)
         self.sample_sizes = self.df.te_sample_size.unique() if sample_sizes is None else sample_sizes
         
     def get_numpy_single_dataset(self, df: pd.DataFrame):
@@ -204,26 +192,20 @@ class Test_Sample_Size_Analysis(Analysis):
     def get_df(self):
         result = self.get_numpy()
         df_result = pd.DataFrame(result,
-                    index=pd.MultiIndex.from_product(
-                        (('Type 1', 'Type 2'), 
-                        ('Mean', 'Std.'))),
-                    columns=pd.MultiIndex.from_product(
-                        (
-                            DATASETS+['Aggregated'], 
-                            self.sample_sizes
-                        ), 
-                        names=('Database', 'Test Sample Size:')
+                    index = self.row_indices,
+                    columns = pd.Index(
+                        data = self.sample_sizes,
+                        name = 'Test Sample Size',
                     ))
         return df_result
     
-class Permutation_Count_Analysis(Analysis):
+class TabularAnalysisPermutationCount(TabularAnalysis):
     description = 'Analysis for permutation count during testing'
     
     def __init__(self, 
                  df: pd.DataFrame, 
-                 datasets_included: 'list[str]' = [[d] for d in DATASETS], 
                  perm_cnts: 'list[int]' = None):
-        super().__init__(df, datasets_included)
+        super().__init__(df)
         self.perm_cnts = self.df.te_perm_cnt.unique() if perm_cnts is None else perm_cnts
         
     def get_numpy_single_dataset(self, df: pd.DataFrame):
@@ -241,26 +223,20 @@ class Permutation_Count_Analysis(Analysis):
     def get_df(self):
         result = self.get_numpy()
         df_result = pd.DataFrame(result,
-                    index=pd.MultiIndex.from_product(
-                        (('Type 1', 'Type 2'), 
-                        ('Mean', 'Std.'))),
-                    columns=pd.MultiIndex.from_product(
-                        (
-                            DATASETS+['Aggregated'], 
-                            self.perm_cnts
-                        ), 
-                        names=('Database', 'Test Permutation Count:')
+                    index = self.row_indices,
+                    columns = pd.Index(
+                        data = self.perm_cnts,
+                        name = 'Test Permutation Count',
                     ))
         return df_result
     
-class LLM_Analysis(Analysis):
+class TabularAnalysisLLM(TabularAnalysis):
     description = 'Analysis for different LLMs'
 
     def __init__(self, 
                  df: pd.DataFrame, 
-                 datasets_included: 'list[str]' = [[d] for d in DATASETS], 
                  llms: 'list[str]' = None):
-        super().__init__(df, datasets_included)
+        super().__init__(df)
         self.llms = self.df.te_data_llm.unique() if llms is None else llms
         
     def get_numpy_single_dataset(self, df: pd.DataFrame):
@@ -278,165 +254,472 @@ class LLM_Analysis(Analysis):
     def get_df(self):
         result = self.get_numpy()
         df_result = pd.DataFrame(result,
-                    index=pd.MultiIndex.from_product(
-                        (('Type 1', 'Type 2'), 
-                        ('Mean', 'Std.'))),
-                    columns=pd.MultiIndex.from_product(
-                        (
-                            DATASETS+['Aggregated'], 
-                            self.llms
-                        ), 
-                        names=('Database', 'Test LLM:')
+                    index = self.row_indices,
+                    columns = pd.Index(
+                        data = self.llms,
+                        name = 'Test LLM:',
                     ))
         return df_result
     
-class SST_True_Data_Ratio_Analysis(Analysis):
+class TabularAnalysisSSTTrueDataRatio(TabularAnalysis):
     description = 'Analysis for single sample test true data ratio'
 
     def __init__(self, 
                  df: pd.DataFrame, 
-                 datasets_included: 'list[str]' = [[d] for d in DATASETS], 
                  true_data_ratio: 'list[int]' = None):
-        super().__init__(df, datasets_included)
+        super().__init__(df)
         self.true_data_ratios = self.df.te_sst_true_ratio.unique() if true_data_ratio is None else true_data_ratio
         self.true_data_ratios.sort()
+        self.s1s2s = self.df.te_sst_userfill_type.unique()
         
     def get_numpy_single_dataset(self, df: pd.DataFrame):
-        result = np.zeros((4, len(self.true_data_ratios)))
+        result = np.zeros((2, len(self.true_data_ratios)))
         for i, tdr in enumerate(self.true_data_ratios):
             for j, s1s2 in enumerate(S1S2):
                 df_result = df[
                         (df.te_sst_true_ratio == tdr) 
-                        & (df.sst_userfill_type.map(lambda x: x in s1s2))
+                        & (df.te_sst_userfill_type.map(lambda x: x in s1s2))
                     ].test_power
-                result[2*j, i] = df_result.mean()
-                result[2*j+1, i] = df_result.std()
+                result[j, i] = df_result.mean()
         return result
     
     def get_df(self):
         result = self.get_numpy()
         df_result = pd.DataFrame(result,
-                    index=pd.MultiIndex.from_product(
-                        (('Type 1', 'Type 2'), 
-                        ('Mean', 'Std.'))),
-                    columns=pd.MultiIndex.from_product(
-                        (
-                            DATASETS+['Aggregated'], 
-                            self.true_data_ratios
-                        ), 
-                        names=('Database', 'True data ratio:')
+                    index = pd.Index(
+                        data = ('Type 1', 'Type 2'),
+                        name = 'Test Type',
+                    ),
+                    columns = pd.Index(
+                        data = self.true_data_ratios,
+                        name = 'True data ratio',
                     ))
         return df_result
     
-class SST_Dataset_Analysis(Analysis):
+class TabularAnalysisSSTDataset(TabularAnalysis):
     description = 'Analysis for single sample test with different combination of test and fill datasets'
     
     def __init__(self, 
-                 df: pd.DataFrame, 
-                 test_datasets: 'list[str]' = None,
-                 fill_datasets: 'list[str]' = None):
+                 df: pd.DataFrame,):
         super().__init__(df, DATASETS)
-        self.test_datasets = self.df.te_sst_user_dataset.unique() if test_datasets is None else test_datasets
-        self.fill_datasets = self.df.te_sst_fill_dataset.unique() if fill_datasets is None else fill_datasets
+        self.user_datasets = self.df.te_sst_user_dataset.unique()
+        self.fill_datasets = self.df.te_sst_fill_dataset.unique()
     
     def get_numpy_single_dataset(self, df: pd.DataFrame) -> np.array:
         return self.get_numpy(df)
     
     def get_numpy(self, df: pd.DataFrame):
-        result = np.zeros((4, len(self.test_datasets) * len(self.fill_datasets)))
-        for i, tds in enumerate(self.test_datasets):
+        result = np.zeros((4 * len(self.user_datasets), len(self.fill_datasets)))
+        for i, tds in enumerate(self.user_datasets):
             for j, fds in enumerate(self.fill_datasets):
                 for k, s1s2 in enumerate(S1S2):
                     df_result = df[
                             (df.te_sst_user_dataset == tds) 
                             & (df.te_sst_fill_dataset == fds)
-                            & (df.sst_userfill_type.map(lambda x: x in s1s2))
+                            & (df.te_sst_userfill_type.map(lambda x: x in s1s2))
                         ].test_power
-                    result[2*k, len(self.fill_datasets)*i+j] = df_result.mean()
-                    result[2*k+1, len(self.fill_datasets)*i+j] = df_result.std()
+                    result[i*4 + 2*k, j] = df_result.mean()
+                    result[i*4 + 2*k+1, j] = df_result.std()
         return result
     
     def get_df(self):
         result = self.get_numpy(self.df)
     
         df_result = pd.DataFrame(result,
-                    index=pd.MultiIndex.from_product(
-                        (('Type 1', 'Type 2'), 
-                        ('Mean', 'Std.'))),
-                    columns=pd.MultiIndex.from_product(
-                        (
-                            self.test_datasets,
-                            self.fill_datasets
-                        ), 
-                        names=('Test Dataset', 'Fill Dataset')
+                    index = pd.MultiIndex.from_product(
+                        iterables=(
+                            self.user_datasets,
+                            ('Type 1', 'Type 2'), 
+                            ('Mean', 'Std.')
+                        ),
+                        names=('User Dataset', 'Test Type', 'Test Power')
+                    ),
+                    columns = pd.Index(
+                        data=self.fill_datasets,
+                        name='Fill Dataset',
                     ))
         return df_result
+
+###########################################
+# Graphic Analysis
+###########################################
+
+class GraphAnalysis(abc.ABC):
+    '''Abstract class for graph analysis'''
+    description = None
+    
+    def __init__(self, df) -> None:
+        self.df = df
+    
+    def add_desired_line(g, label_x, test_type):
+        target = 0.05 if test_type == 1 else 1.0
+        def specs(x, **kwargs):
+            plt.axhline(target, c='red', ls='--', lw=1.5)
+        g.map(specs, 'test_power')  
+        g.axes.flat[0].text(label_x, 0.994 if test_type == 2 else 0.049, "Target", color="red")
+
+    @abc.abstractmethod
+    def plot_graph(self):
+        pass
+    
+class GraphAnalysisShuffle(GraphAnalysis):
+    description = 'Analysis for whether training and testing data are shuffled'
+    
+    def __init__(self, df) -> None:
+        super().__init__(df)
+        
+    def plot_graph(self):
+        for test_type in [1, 2]:
+            df = self.df
             
+            # Type
+            df = df[df['te_tst_s1s2_type'].map(lambda x: x in (['hm', 'mh'] if test_type == 2 else ['hh', 'mm']))]
+
+            # Add required rows
+            for tr in [True, False]:
+                for te in [True, False]:
+                    mean = df[(df['tr_shuffle'] == tr) & (df['te_shuffle'] == te)]['test_power'].mean()
+                    row = {'tr_shuffle': tr, 'te_shuffle': te, 'te_tst_datasets': 'Average', 'test_power': mean}
+                    row = pd.DataFrame(columns=df.columns, data=[row])
+                    df = pd.concat([df, row], axis=0)
+                    
+            # Add required colums
+            df['trte_shuffle'] = df.apply(lambda row: f'{row.tr_shuffle} {row.te_shuffle}', axis=1)
+            df.sort_values(by=['trte_shuffle'], inplace=True)
+
+            # Plot
+            sns.set_style("whitegrid")
+            g = sns.catplot(df, kind='bar', x='trte_shuffle', y='test_power', hue='te_tst_datasets', sharey=True, aspect=2, capsize=0.2)
+            for ax in g.axes.flat:
+                for c in ax.containers:
+                    labels = [f'{v.get_height():.3f}' for v in c]
+                    ax.bar_label(c, labels=labels, label_type='center', color='white', fontsize=9, fontweight='bold')
+
+            # Add desired line
+            GraphAnalysis.add_desired_line(g, 3.5, test_type)
+
+            # Style
+            g.despine(left=True)
+            g.set_xlabels('(Train data shuffled, Test data shuffled)')
+            g.set_ylabels(f'Type {test_type} Test Power (Mean)')
+            g.legend.set_title('Test Dataset')
+            plt.show()           
+
+class GraphAnalysisLinearSize(GraphAnalysis):
+    description = 'Analysis for linear layer size multiple'
+    
+    def __init__(self, df) -> None:
+        super().__init__(df)
+        
+    def plot_graph(self):
+        for test_type in [1, 2]:
+            df = self.df
+        
+            # Type
+            df = df[df['te_tst_s1s2_type'].map(lambda x: x in (['hm', 'mh'] if test_type == 2 else ['hh', 'mm']))]
+
+            # Add required rows
+            for ls in df.tr_lin_size.unique():
+                mean = df[df.tr_lin_size == ls]['test_power'].mean()
+                row = {'tr_lin_size': ls, 'te_tst_datasets': 'Average', 'test_power': mean}
+                row = pd.DataFrame(columns=df.columns, data=[row])
+                df = pd.concat([df, row], axis=0)
+
+            # Plot
+            sns.set_style("whitegrid")
+            g = sns.catplot(df, kind='bar', x='tr_lin_size', y='test_power', hue='te_tst_datasets', sharey=True, aspect=1.5, capsize=0.2, err_kws={'linewidth': 1})
+            for ax in g.axes.flat:
+                for c in ax.containers:
+                    labels = [f'{v.get_height():.3f}' for v in c]
+                    ax.bar_label(c, labels=labels, label_type='center', color='white', fontsize=9, fontweight='bold')
+
+            # Add desired line
+            GraphAnalysis.add_desired_line(g, 1.5, test_type)
+
+            # Style
+            g.despine(left=True)
+            g.set_xlabels('Model Linear Layer Size Multiple')
+            g.set_ylabels(f'Type {test_type} Test Power (Mean)')
+            g.legend.set_title('Test Dataset')
+            plt.show()    
+
+class GraphAnalysisPermCnt(GraphAnalysis):
+    description = 'Analysis for permutation count during testing'
+    
+    def __init__(self, df) -> None:
+        super().__init__(df)
+        
+    def plot_graph(self):
+        for test_type in [1, 2]:
+            df = self.df
+            
+            # Type
+            df = df[df['te_tst_s1s2_type'].map(lambda x: x in (['hm', 'mh'] if test_type == 2 else ['hh', 'mm']))]
+
+            # Add required rows
+            for x in df.te_perm_cnt.unique():
+                mean = df[df.te_perm_cnt == x]['test_power'].mean()
+                row = {'te_perm_cnt': x, 'te_tst_datasets': 'Average', 'test_power': mean}
+                row = pd.DataFrame(columns=df.columns, data=[row])
+                df = pd.concat([df, row], axis=0)
+
+            # Plot
+            sns.set_style("whitegrid")
+            g = sns.catplot(df, kind='point', x='te_perm_cnt', y='test_power', hue='te_tst_datasets', sharey=True, aspect=1.5, capsize=0.2, err_kws={'linewidth': 1})
+
+            # Add desired line
+            GraphAnalysis.add_desired_line(g, 4.5, test_type)
+
+            # Style
+            g.despine(left=True)
+            g.set_xlabels('Two-Sample Test Permutation Count')
+            g.set_ylabels(f'Type {test_type} Test Power (Mean)')
+            g.legend.set_title('Test Dataset')
+            plt.show()         
+
+class GraphAnalysisPermCntTiming(GraphAnalysis):
+    description = 'Analysis for test time for different permutation counts, result is hard-coded'
+    
+    def __init__(self, df) -> None:
+        super().__init__(df)
+        
+    def plot_graph(self):
+        df = pd.DataFrame({
+            'te_perm_cnt': [50, 100, 200, 300, 400],
+            'time': [2.9, 3.2, 4.9, 5.4, 6.9]
+        })
+        sns.set_style("whitegrid")
+        g = sns.catplot(df, kind='point', x='te_perm_cnt', y='time', sharey=True, aspect=1.3, capsize=0.2, err_kws={'linewidth': 1})
+        
+        # Style
+        g.despine(left=True)
+        g.set_xlabels('Two-Sample Test Permutation Count')
+        g.set_ylabels(f'Test Running Time (s)')
+        plt.show() 
+
+class GraphAnalysisSampleSize(GraphAnalysis):
+    description = 'Analysis for sample size during testing'
+    
+    def __init__(self, df) -> None:
+        super().__init__(df)
+        
+    def plot_graph(self):
+        for test_type in [1, 2]:
+            df = self.df
+        
+            # Type
+            df = df[df['te_tst_s1s2_type'].map(lambda x: x in (['hm', 'mh'] if test_type == 2 else ['hh', 'mm']))]
+            
+            # Add required rows
+            for x in df.te_sample_size.unique():
+                mean = df[df.te_sample_size == x]['test_power'].mean()
+                row = {'te_sample_size': x, 'te_tst_datasets': 'Average', 'test_power': mean}
+                row = pd.DataFrame(columns=df.columns, data=[row])
+                df = pd.concat([df, row], axis=0)
+
+            # Plot
+            sns.set_style("whitegrid")
+            g = sns.catplot(df, kind='point', x='te_sample_size', y='test_power', hue='te_tst_datasets', sharey=True, aspect=1.5, capsize=0.2, err_kws={'linewidth': 1})
+                    
+            # Add desired line
+            GraphAnalysis.add_desired_line(g, 4.5, test_type)
+
+            # Style
+            g.despine(left=True)
+            g.set_xlabels('Two-Sample Test Sample Set Size')
+            g.set_ylabels(f'Type {test_type} Test Power (Mean)')
+            g.legend.set_title('Test Dataset')
+            plt.show()    
+            
+
+class GraphAnalysisSampleSizeAcrossModel(GraphAnalysis):
+    description = 'Analysis for sample size during testing across models trained with different datasets'
+    
+    def __init__(self, df) -> None:
+        super().__init__(df)
+         
+    def plot_graph(self):
+        for test_dataset in ['TruthfulQA', 'SQuAD1', 'NarrativeQA', 'Average']:
+            print(f"Printing graph for dataset {test_dataset}...")
+            for test_type in [1, 2]:
+                df = self.df
+            
+                # Filter Type
+                df = df[df['te_tst_s1s2_type'].map(lambda x: x in (['hm', 'mh'] if test_type == 2 else ['hh', 'mm']))]
+                
+                # Add required rows
+                for tr_datasets in df.tr_datasets.unique():
+                    for x in df.te_sample_size.unique():
+                        mean = df[(df.te_sample_size == x) & (df.tr_datasets == tr_datasets)]['test_power'].mean()
+                        row = {'te_sample_size': x, 'tr_datasets': tr_datasets, 'te_tst_datasets': 'Average', 'test_power': mean}
+                        row = pd.DataFrame(columns=df.columns, data=[row])
+                        df = pd.concat([df, row], axis=0)
+                
+                # Filter Dataset
+                df = df[df['te_tst_datasets'] == test_dataset]
+
+                # Plot
+                sns.set_style("whitegrid")
+                g = sns.catplot(df, kind='point', x='te_sample_size', y='test_power', hue='tr_datasets', sharey=True, aspect=1.5, capsize=0.2, err_kws={'linewidth': 1})
+                if test_type == 1:
+                    g.set(ylim=(0.0, 0.3))
+
+                # Add desired line
+                GraphAnalysis.add_desired_line(g, 4.5, test_type)
+
+                # Style
+                g.despine(left=True)
+                g.set_xlabels('Two-Sample Test Sample Set Size')
+                g.set_ylabels(f'Type {test_type} Test Power (Mean)')
+                g.legend.set_title('Model')
+                plt.show()  
+
+
+class GraphAnalysisSeed(GraphAnalysis):
+    description = 'Analysis for models with different training seeds'
+    
+    def __init__(self, df) -> None:
+        super().__init__(df)
+        
+    def plot_graph(self):
+        for test_type in [1, 2]:
+            df = self.df
+        
+            # Type
+            df = df[df['te_tst_s1s2_type'].map(lambda x: x in (['hm', 'mh'] if test_type == 2 else ['hh', 'mm']))]
+            
+            # Add required rows
+            for x in df.tr_seed.unique():
+                mean = df[df.tr_seed == x]['test_power'].mean()
+                row = {'tr_seed': x, 'te_tst_datasets': 'Average', 'test_power': mean}
+                row = pd.DataFrame(columns=df.columns, data=[row])
+                df = pd.concat([df, row], axis=0)
+
+            # Plot
+            sns.set_style("whitegrid")
+            g = sns.catplot(df, kind='bar', x='tr_seed', y='test_power', hue='te_tst_datasets', sharey=True, aspect=1.5, capsize=0.2, err_kws={'linewidth': 1})
+
+            # Add desired line
+            GraphAnalysis.add_desired_line(g, 4.5, test_type)
+
+            # Style
+            g.despine(left=True)
+            g.set_xlabels('Training Seed')
+            g.set_ylabels(f'Type {test_type} Test Power (Mean)')
+            g.legend.set_title('Test Dataset')
+            plt.show()  
+                
+
+class GraphAnalysisSSTTrueRatio(GraphAnalysis):
+    description = 'Analysis for single sample test true data ratio'
+    
+    def __init__(self, df) -> None:
+        super().__init__(df)
+        
+    def plot_graph(self):
+        for test_type in [1, 2]:
+            df = self.df
+        
+            # Filter Type
+            df = df[df['te_sst_userfill_type'].map(lambda x: x in (['hm', 'mh'] if test_type == 2 else ['hh', 'mm']))]
+            
+            # Add required rows
+            for x in df.te_sst_true_ratio.unique():
+                mean = df[df.te_sst_true_ratio == x]['test_power'].mean()
+                row = {'te_sst_true_ratio': x, 'te_sst_user_dataset': 'Average', 'test_power': mean}
+                row = pd.DataFrame(columns=df.columns, data=[row])
+                df = pd.concat([df, row], axis=0)
+
+            # Plot
+            sns.set_style("whitegrid")
+            g = sns.catplot(df, kind='point', x='te_sst_true_ratio', y='test_power', hue='te_sst_user_dataset', sharey=True, aspect=1.5, capsize=0.2, err_kws={'linewidth': 1})
+            if test_type == 1:
+                g.set(ylim=(0.0, 0.3))
+
+            # Add desired line
+            GraphAnalysis.add_desired_line(g, 4.5, test_type)
+
+            # Style
+            g.despine(left=True)
+            g.set_xlabels('Single-Sample Test True User Data Ratio')
+            g.set_ylabels(f'Type {test_type} Test Power (Mean)')
+            g.legend.set_title('Test Dataset')
+            plt.show()  
+
+
 ###########################################
 # Analysis access points
 ###########################################
 
+S1S2 = (('hh', 'mm'), ('hm', 'mh'))
+ARG_TO_ANALYSIS = {
+    'tabular_seed': TabularAnalysisSeed,
+    'tabular_shuffle': TabularAnalysisShuffle,
+    'tabular_linearSize': TabularAnalysisSize,
+    'tabular_sampleSize': TabularAnalysisSampleSize,
+    'tabular_permutationCount': TabularAnalysisPermutationCount,
+    'tabular_LLM': TabularAnalysisLLM,
+    'tabular_SSTTrueDataRatio': TabularAnalysisSSTTrueDataRatio,
+    'tabular_SSTDataset': TabularAnalysisSSTDataset,
+    'graphic_seed': GraphAnalysisSeed,
+    'graphic_shuffle': GraphAnalysisShuffle,
+    'graphic_linearSize': GraphAnalysisLinearSize,
+    'graphic_sampleSize': GraphAnalysisSampleSize,
+    'graphic_sampleSizeAcrossModel': GraphAnalysisSampleSizeAcrossModel,
+    'graphic_permutationCount': GraphAnalysisPermCnt,
+    'graphic_permutationCountTiming': GraphAnalysisPermCntTiming,
+    'graphic_SSTTrueDataRatio': GraphAnalysisSSTTrueRatio,
+}
 
-# def param_proportion_acc_analysis():
-#     '''Accuracy analysis that instead focus on proporation of a certain paramter value over a specific accuracy threshold'''
-#     start_time_str = util.get_current_time_str()
-#     tefile_name = 'test_20230817055948.csv'
+def get_args():
+    parser = ArgumentParser()
     
-#     logger = util.setup_logs(
-#         file_path=f"./analysis_logs/analysis_{start_time_str}.log",
-#         id=start_time_str,
-#     )
+    parser.add_argument('--csv_files', type=str, nargs='+', required=True, help='CSV files to analyze, files are merged into one for analysis.')
+    parser.add_argument('--analysis_name', type=str, choices=ARG_TO_ANALYSIS.keys(), required=True, help='Analysis to run.')
     
-#     # Get data
-#     logger.info(f"Getting and pre-processing data from file {test_file_name}")
-#     df = get_data(test_file_name)
-#     df = get_preprocessed_df(df)
+    parser.add_argument('--test_log_path', type=str, default='./test_logs/', required=False, help='Directory to test logs.')
+    parser.add_argument('--output_folder', type=str, default='./analysis_logs/', required=False, help='Directory to output analysis logs.')
+    parser.add_argument('--debug', action='store_true', required=False, help='Enable debug model to supress log file creation.')
     
-#     # Analysis from existing data
-#     acc_threshold = 0.85
-#     logger.info(f"Starting analysis for type 2 accuracy above {acc_threshold}")
-#     results = get_proportion_analysis_for_acc_above(df, acc_threshold=acc_threshold)
-    
-#     # Log data
-#     for r in results.values():
-#         logger.info(f"\n{r}\n")
+    args = parser.parse_args()
+    return vars(args) # return dict
   
 def main():
     start_time_str = util.get_current_time_str()
-    data_file = 'test_20231005173107_SQuAD1_sample_size.csv'
-    log_dir = './analysis_logs/'
-    analysis_name = f"analysis_{start_time_str}"
+    
+    args = get_args()
     
     # Setup logs
-    
     logger = util.setup_logs(
-        file_path=os.path.join(log_dir, analysis_name + '.log'),
+        file_path=None,
         id=start_time_str,
-        is_debug=DEBUG
+        is_debug=args['debug'],
+        supress_file=True,
     )
     
-    logger.info(f"Using file: {data_file}")
+    # Get data
+    logger.info(f"Using files: {args['csv_files']}")
+    df_list = []
+    for f in args['csv_files']:
+        df_list.append(pd.read_csv(os.path.join(args['test_log_path'], f)))
+    df = pd.concat(df_list, axis=0)
     
-    # Data read and preprocess 
-    df = pd.read_csv(os.path.join(DATA_PATH, data_file))
-    df = df.drop(columns=df.columns[0])
-    
-    # Filtering
-    # df = df[
-    #     (df.tr_shuffle == False)
-    #     & (df.te_shuffle == True)
-    #     & (df.tr_lin_size == 3)
-    # ]
-    
-    # Start
+    # Start analysis
+    analysis = ARG_TO_ANALYSIS[args['analysis_name']](df)
 
-    result = Test_Sample_Size_Analysis(df).get_postprocessed_df(logger)
-    # seeds_df = Seed_Analysis(df).get_df().round(4)
-    
-    # Save to csv
-    csv_path = os.path.join(log_dir, analysis_name + '.csv')
-    result.to_csv(csv_path)
-    logger.info(f'Result saved to csv at {csv_path}')
+    if isinstance(analysis, TabularAnalysis):
+        logger.info(f'Running Tabular Analysis: {analysis.description}...')
+        result = analysis.get_postprocessed_df(logger)
+        
+        # Save to csv
+        if not args['debug']:
+            output_csv_path = os.path.join(args['output_folder'], f'analysis_{start_time_str}.csv')
+            result.to_csv(output_csv_path)
+            logger.info(f'Result saved to csv file at {output_csv_path}')
+            
+    elif isinstance(analysis, GraphAnalysis):
+        logger.info(f'Running Graph Analysis: {analysis.description}...')
+        analysis.plot_graph()
 
 if __name__ == '__main__':
     main()

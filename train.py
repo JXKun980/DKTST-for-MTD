@@ -4,7 +4,7 @@ import re
 import torch
 import simple_parsing
 
-from model import DKTST
+from model import DKTST_for_MTD
 import util
 
 
@@ -52,7 +52,7 @@ def log_training_parameters(args, logger, model_path):
 
 
 def start_training(args):
-    '''Start a training instance based on the arguments'''
+    '''Start a single training process based on the arguments'''
     start_time_str = util.get_current_time_str()
     
     util.setup_seeds(args['seed'])
@@ -82,7 +82,7 @@ def start_training(args):
     
     # Set up model
     logger.info(f'Setting up model...')
-    dktst = DKTST(
+    dktst = DKTST_for_MTD(
         latent_size_multi=args['hidden_multi'],
         device=args['device'],
         dtype=util.str_to_dtype(args['dtype']),
@@ -136,7 +136,7 @@ def get_args():
     # Per Run Parameters
     parser.add_argument('--model_dir', type=str, default='./models', help='Directory to save models')
     parser.add_argument('--device', '-dv', type=str, default='auto', help='Device to use for training')
-    parser.add_argument('--debug', default=False, action='store_true', help='Enable debug mode')
+    parser.add_argument('--debug', default=False, action='store_true', help='Enable debug mode, which supresses file creations.')
     # Continue Parameters
     parser.add_argument('--continue_model', type=str, default=None, help='Name of the model folder to continue training. If set, all parameters below are ignored.')
     # Training parameters
@@ -170,75 +170,16 @@ def get_args():
 def main():
     args = get_args()
     
-    args['continue_model'] = 'TruthfulQA_SQuAD1_NarrativeQA_ChatGPT_hm_nos_3_8000_20_1103_5e-05_20231003181620'
-    start_training(args)
-    args['continue_model'] = None
-    
     args['hidden_multi'] = 3
-    args['n_epoch'] = 5000
-    args['datasets'] = ['SQuAD1']
-    args['dataset_llm'] = 'ChatGPT'
-    args['shuffle'] = False
-    args['learning_rate'] = 0.00005
-    args['sample_size_train'] = 20
-    args['seed'] = 1104
-    args['sample_count_test'] = 20
-    start_training(args)   
-    
-    args['hidden_multi'] = 3
-    args['n_epoch'] = 5000
-    args['datasets'] = ['SQuAD1']
-    args['dataset_llm'] = 'ChatGPT'
-    args['shuffle'] = False
-    args['learning_rate'] = 0.00005
-    args['sample_size_train'] = 20
-    args['seed'] = 1105
-    args['sample_count_test'] = 20
-    start_training(args)   
-    
-    args['hidden_multi'] = 3
-    args['n_epoch'] = 8000
+    args['n_epoch'] = 3000
     args['datasets'] = ['TruthfulQA', 'SQuAD1', 'NarrativeQA']
     args['dataset_llm'] = 'ChatGPT'
     args['shuffle'] = False
     args['learning_rate'] = 0.00005
     args['sample_size_train'] = 20
-    args['seed'] = 1104
+    args['seed'] = 1103
     args['sample_count_test'] = 20
     start_training(args)   
-    
-    args['hidden_multi'] = 3
-    args['n_epoch'] = 8000
-    args['datasets'] = ['TruthfulQA', 'SQuAD1', 'NarrativeQA']
-    args['dataset_llm'] = 'ChatGPT'
-    args['shuffle'] = False
-    args['learning_rate'] = 0.00005
-    args['sample_size_train'] = 20
-    args['seed'] = 1105
-    args['sample_count_test'] = 20
-    start_training(args) 
-    
-    args['hidden_multi'] = 3
-    args['n_epoch'] = 5000
-    args['datasets'] = ['NarrativeQA']
-    args['dataset_llm'] = 'ChatGPT'
-    args['shuffle'] = False
-    args['learning_rate'] = 0.00005
-    args['sample_size_train'] = 20
-    args['seed'] = 1107
-    args['sample_count_test'] = 20
-    start_training(args)
-    
-    args['hidden_multi'] = 3
-    args['n_epoch'] = 5000
-    args['datasets'] = ['NarrativeQA']
-    args['dataset_llm'] = 'ChatGPT'
-    args['shuffle'] = False
-    args['learning_rate'] = 0.00005
-    args['sample_size_train'] = 20
-    args['seed'] = 1106
-    args['sample_count_test'] = 20
-    start_training(args)
     
     
     # Continue Training Template

@@ -11,9 +11,14 @@ from torch.utils.tensorboard import SummaryWriter
 from external.dktst_utils_HD import MatConvert, MMDu, TST_MMD_u
 import util
     
-class DKTST:
+class DKTST_for_MTD:
+    '''
+    The main class for the DKTST-for-MTD model
+    '''
+    
     class ModelLatentF(torch.nn.Module):
-        """Latent space for both domains."""
+        """Linear layers for latent features."""
+        
         def __init__(self, in_dim, H_dim, out_dim):
             """Init latent features."""
             super(type(self), self).__init__()
@@ -40,11 +45,11 @@ class DKTST:
                 torch.nn.init.zeros_(m.bias)
         
     def __init__(self,
-                 latent_size_multi, 
-                 device, 
-                 dtype,
+                 latent_size_multi: int, 
+                 device: str, 
+                 dtype: torch.dtype, # torch.float32 or torch.float64
                  logger: logging.Logger,
-                 debug=False) -> None:
+                 debug: bool=False) -> None:
         
         self.device = device
         self.dtype = dtype
@@ -81,10 +86,10 @@ class DKTST:
     def get_parameters_list(self):
         return list(self.latent.parameters()) + [self.epsilonOPT] + [self.sigmaOPT] + [self.sigma0OPT]
     
-    def encode_sentences(self, s): # s1s2: 
+    def encode_sentences(self, s):
         """
         @params
-            s: Sentences to be encoded. np.array[str] of shape (sample_size,) 
+            s: Sentences to be encoded. np.NDArray[str] of shape (sample_size,) 
         @returns
             np.array[float] of shape (sample_size, encoding_size)
         """
@@ -97,6 +102,14 @@ class DKTST:
         return batch_data_cls
     
     def get_J_star(self, s1s2_cls):
+        """
+        @params
+            s1s2_cls: Numpy array of sentence encodings (encoded CLS tokens). np.array[float] of shape (sample_size, encoding_size)
+        @returns
+            STAT_u: J_star estimate
+            mmd_value_temp: MMD value estimate
+            mmd_std_temp: MMD standard deviation estimate
+        """
         # Compute epsilon, sigma and sigma_0
         ep = torch.exp(self.epsilonOPT) / (1 + torch.exp(self.epsilonOPT))
         sigma = self.sigmaOPT ** 2
@@ -121,15 +134,35 @@ class DKTST:
     def train_and_test(self, 
                        data_tr: util.Two_Sample_Dataset, 
                        data_te: util.Two_Sample_Dataset, 
-                       lr, 
-                       total_epoch, 
-                       save_folder, 
-                       perm_cnt, 
-                       sig_lvl, 
-                       start_epoch=0, 
-                       eval_inteval=100, 
-                       save_interval=500, 
-                       seed=1103):
+                       lr: float, 
+                       total_epoch: int, 
+                       save_folder: str, 
+                       perm_cnt: int, 
+                       sig_lvl: float, 
+                       start_epoch: int=0, 
+                       eval_inteval: int=100, 
+                       save_interval: int=500, 
+                       seed: int=1103):
+        """
+        Main training procedure (with validation testing)
+        
+        @params
+            data_tr: Training dataset
+            data_te: Test (Validation) dataset
+            lr: Initial learning rate for Adam optimizer
+            total_epoch: Total number of epochs to train
+            save_folder: Folder name (in current working directory) to save checkpoints
+            perm_cnt: Number of permutations to use for two sample test
+            sig_lvl: Significance level for two sample test
+            start_epoch: Epoch to start training from (useful for resuming training)
+            eval_inteval: Number of epochs between each evaluation
+            save_interval: Number of epochs between each checkpoint save
+            seed: Seed to use for training
+        @returns
+            J_stars_epoch: List of J_star estimates for each epoch
+            mmd_values_epoch: List of MMD value estimates for each epoch
+            mmd_stds_epoch: List of MMD standard deviation estimates for each epoch
+        """
         self.logger.debug("Start training...")
         
         total_epoch += 1 # To end up at a whole numbered epoch
@@ -252,7 +285,13 @@ class DKTST:
         
         return J_stars_epoch, mmd_values_epoch, mmd_stds_epoch
 
-    def load(self, chkpnt_path):
+    def load(self, chkpnt_path: str):
+        '''
+        Load checkpoint for the model
+        
+        @params
+            chkpnt_path: Path to checkpoint file
+        '''
         chkpnt = torch.load(chkpnt_path)
         self.latent.load_state_dict(chkpnt['model_state_dict'])
         self.optimizer.load_state_dict(chkpnt['optimizer_state_dict'])
@@ -261,7 +300,14 @@ class DKTST:
         self.sigmaOPT = chkpnt['sigmaOPT'].to(self.device)
         self.sigma0OPT = chkpnt['sigma0OPT'].to(self.device)
         
-    def save(self, save_folder, epoch):
+    def save(self, save_folder: str, epoch: int):
+        '''
+        Save checkpoint for the model
+        
+        @params
+            save_folder: Folder name (in current working directory) to save checkpoints
+            epoch: Epoch number to save checkpoint at
+        '''
         if not self.debug:
             file_path = f'{save_folder}/model_ep_{epoch}.pth'
             self.logger.info(f"Saving model to {file_path}...")
@@ -276,9 +322,19 @@ class DKTST:
         else:
             logging.debug("Model not saved due to debug mode.")
         
-    def test(self, data: util.Dataset, perm_cnt, sig_lvl, seed=1103):
+    def test(self, data: util.Dataset, perm_cnt: int, sig_lvl: float, seed: int=1103):
         '''
-        Perform test given dataset
+        Main test procedure
+        
+        @params
+            data: Dataset to test on
+            perm_cnt: Number of permutations to use for two sample test
+            sig_lvl: Significance level for two sample test
+            seed: Seed to use for testing
+        @returns
+            test_power: Test power
+            thresholds: List of thresholds for each test sample
+            mmds: List of MMD values for each test sample
         '''
         self.logger.debug("Start testing...")
         self.latent.eval()
@@ -336,12 +392,18 @@ class DKTST:
             
         return test_power, thresholds, mmds
     
-    def strong_single_sample_test(self, data: util.Dataset, data_comp: util.Dataset, perm_cnt, sig_lvl, seed=1103):
+    def strong_single_sample_test(self, data: util.Dataset, data_comp: util.Dataset, perm_cnt: int, sig_lvl: float, seed: int=1103):
         '''
         Stronger single sample test that requires two datasets, each contains fill data with a different data type (human and machine).
         Structure is largely similar to test() above.
-        
         Each test sample set is tested twice, against both types of fill data. If results from the two tests do not agree, the test procedure is repeated until they agree.
+        
+        @params
+            data: Dataset to test on
+            data_comp: Dataset to test on (with different data type)
+            perm_cnt: Number of permutations to use for two sample test
+            sig_lvl: Significance level for two sample test
+            seed: Seed to use for testing
         '''
         self.logger.debug("Start strong single sample testing...")
         self.latent.eval()
@@ -428,10 +490,21 @@ class DKTST:
     def validation( self, 
                     data_diff: util.Two_Sample_Dataset, 
                     data_same: util.Two_Sample_Dataset, 
-                    perm_cnt, 
-                    sig_lvl, 
+                    perm_cnt: int, 
+                    sig_lvl: float, 
                     writer=None, 
-                    epoch=None):
+                    epoch: int=None):
+        '''
+        Main validation procedure
+        
+        @params
+            data_diff: Dataset to test on (with different data type)
+            data_same: Dataset to test on (with same data type)
+            perm_cnt: Number of permutations to use for two sample test
+            sig_lvl: Significance level for two sample test
+            writer: Tensorboard writer
+            epoch: Epoch number to save checkpoint at
+        '''
         sample_sizes = [10]
         val_powers1 = np.empty(len(sample_sizes))
         val_powers2 = np.empty(len(sample_sizes))

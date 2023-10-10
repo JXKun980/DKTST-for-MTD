@@ -9,7 +9,7 @@ from tqdm import tqdm
 import simple_parsing
 
 import util
-from model import DKTST
+from model import DKTST_for_MTD
 
 
 def log_testing_parameters(args, logger):
@@ -19,6 +19,9 @@ def log_testing_parameters(args, logger):
     logger.info(logging_str)
     
 def get_test_result(args, logger):
+    '''
+    Perform a single test with given parameters in args and return the result.
+    '''
     logger.info("\n\n=========== Testing Starts ============\n")
     
     util.setup_seeds(args['seed'])
@@ -79,7 +82,7 @@ def get_test_result(args, logger):
     logger.info(f'Loading model...')
     model_path = os.path.join(args['model_dir'], args['model_name'])
     train_config = util.Training_Config_Handler.get_train_config(model_path)
-    dktst = DKTST(
+    dktst = DKTST_for_MTD(
         latent_size_multi=train_config['hidden_multi'],
         device=args['device'],
         dtype=util.str_to_dtype(train_config['dtype']),
@@ -103,7 +106,7 @@ def get_test_result(args, logger):
     log_testing_parameters(args, logger)
     
     # Start testing
-    if args['test_type'] == 'TST' or (args['test_type'] == 'SST' and args['sst_strong']): # Normal two sample test and single sample test
+    if args['test_type'] == 'TST' or (args['test_type'] == 'SST' and not args['sst_strong']): # Normal two sample test and single sample test
         test_power, test_thresholds, test_mmds = dktst.test(
             data=data_te,
             perm_cnt=args['perm_cnt'],
@@ -131,7 +134,7 @@ def get_test_result(args, logger):
         f"{test_mmd_mean=}\n"
     )
     
-    return test_power, test_threshold_mean, test_mmd_mean, len(data_te)
+    return test_power, test_threshold_mean, test_mmd_mean
     
 def perform_batch_test_aux(
                        args, # The original arguments are overwritten by the following parameters
@@ -167,6 +170,38 @@ def perform_batch_test_aux(
                        te_sst_true_ratio_list,
                        te_sst_strong_list,
                        ):
+        '''
+        The function that cross product all the parameters to test for and batch perform the test. Results are saved as CSV file.
+        
+        @params
+            args: The original arguments are overwritten by the following parameters
+            logger: The logger to use
+            tr_datasets_list: List of datasets the tested model is trained on
+            tr_dataset_llm_list: List of LLMs the tested model is trained on
+            tr_s1s2_type_list: List of types of data the tested model is trained on
+            tr_shuffle_list: List of whether the tested model is trained with shuffled data
+            tr_linear_size_list: List of linear layer size of the tested model
+            tr_epoch_list: List of epoch count of the tested model
+            tr_sample_size_list: List of sample size of the tested model
+            tr_seed_list: List of seed of the tested model
+            tr_lr_list: List of learning rate of the tested model
+            tr_chkpnt_ep_list: List of checkpoint epoch of the tested model
+            te_dataset_llm_list: List of LLMs the model is tested on
+            te_shuffle_list: List of whether the model is tested with shuffled data
+            te_sample_size_list: List of sample size of the model is tested on
+            te_sample_cnt_list: List of sample count of the model is tested on
+            te_sig_lvl_list: List of significance level of the model is tested on
+            te_perm_cnt_list: List of permutation count of the model is tested on
+            te_seed_list: List of seed of the model is tested on
+            te_test_type: Type of test to run (TST or SST)
+            te_tst_datasets_list: List of datasets the model is tested on (TST only)
+            te_tst_s1s2_type_list: List of types of data the model is tested on (TST only)
+            te_sst_user_dataset_list: List of user datasets the model is tested on (SST only)
+            te_sst_fill_dataset_list: List of fill datasets the model is tested on (SST only)
+            te_sst_userfill_type_list: List of types of data the model is tested on (SST only)
+            te_sst_true_ratio_list: List of true ratio of the model is tested on (SST only)
+            te_sst_strong_list: List of whether the model is tested on strong mode (SST only)
+        '''
         logger.info("=========== Starting batch test ===========")
         
         # Use default parameters for one of the tests as it is not used
@@ -320,12 +355,12 @@ def perform_batch_test_aux(
                     new_args['sst_true_ratio'] = te_sst_true_ratio
                     new_args['sst_strong'] = te_sst_strong
                     
-                    test_power, threshold_mean, mmd_mean, test_size = get_test_result(args=new_args, logger=logger)
+                    test_power, threshold_mean, mmd_mean = get_test_result(args=new_args, logger=logger)
                     
                     results.append( # Append each result as a new row
                         dict(
                             model_name=model_name,
-                            tr_datasets=tr_datasets,
+                            tr_datasets=', '.join(tr_datasets),
                             tr_data_llm=tr_data_llm,
                             tr_s1s2_type=tr_s1s2_type,
                             tr_shuffle=tr_shuffle,
@@ -340,10 +375,10 @@ def perform_batch_test_aux(
                             te_perm_cnt=te_perm_cnt,
                             te_shuffle=te_shuffle,
                             te_sample_size=te_sample_size,
-                            te_sample_count=te_sample_cnt,
+                            te_sample_cnt=te_sample_cnt,
                             te_seed=te_seed,
                             te_test_type=te_test_type,
-                            te_tst_datasets=te_tst_datasets,
+                            te_tst_datasets=', '.join(te_tst_datasets),
                             te_tst_s1s2_type=te_tst_s1s2_type,
                             te_sst_user_dataset=te_sst_user_dataset,
                             te_sst_fill_dataset=te_sst_fill_dataset,
@@ -363,7 +398,7 @@ def perform_batch_test_aux(
     
     
 def perform_batch_test(args, logger):
-      
+    '''Perform batch test with the following parameters and save results to file. The script arguments are overwritten by the following parameters.'''
     batch_start_time_str = util.get_current_time_str()
     result_df = perform_batch_test_aux(
         args=args, 
@@ -371,12 +406,12 @@ def perform_batch_test(args, logger):
         
         # Models' parameters, used to load the trained model.
         # Default assume the use of the latest trained model if multiple ones exist for a configuration
-        tr_datasets_list=[['SQuAD1']],
+        tr_datasets_list=[['TruthfulQA']], # Note each item is another list of datasets, represnting a merged dataset
         tr_dataset_llm_list=['ChatGPT'],
         tr_s1s2_type_list = ['hm'],
         tr_shuffle_list = [False],
         tr_linear_size_list = [3], # [3, 5]
-        tr_epoch_list = [5000],
+        tr_epoch_list = [3000],
         tr_sample_size_list = [20],
         tr_seed_list = [1103, 1104, 1105],
         tr_lr_list = [5e-05], # [5e-05, 1e-03]
@@ -385,22 +420,22 @@ def perform_batch_test(args, logger):
         # Shared testing parameters
         te_dataset_llm_list = ['ChatGPT'], # ['ChatGPT', 'ChatGLM', 'Dolly', 'ChatGPT-turbo', 'GPT4', 'StableLM']
         te_shuffle_list = [False], # [True, False]
-        te_sample_size_list = [20, 10, 5, 4, 3], # [20, 10, 5, 4, 3]
+        te_sample_size_list = [2,3,4,5,6,7,8,9], # [20, 10, 5, 4, 3]
         te_sample_cnt_list = [20],
         te_sig_lvl_list = [0.05],
         te_perm_cnt_list = [200], # [20, 50, 100, 200, 400]
         te_seed_list = [1103],
         
-        te_test_type = 'TST', # TST or SST
+        te_test_type = 'TST', # TST (Two sample test) or SST (Single sample test)
         
         # Two Sample Test only parameters (Will not run if SST is enabled)
-        te_tst_datasets_list = [['SQuAD1'], ['TruthfulQA'], ['NarrativeQA']], # Dataset(s) to test    # [['SQuAD1'], ['TruthfulQA'], ['NarrativeQA']] 
+        te_tst_datasets_list = [['SQuAD1'], ['TruthfulQA'], ['NarrativeQA']], # Note each item is another list of datasets, represnting a merged dataset
         te_tst_s1s2_type_list = ['hm', 'hh', 'mm'], # Type of data (human or machine) for the first and second sample set   # ['hm', 'hh', 'mm'] 
         
         # Single Sample Test only parameters (If SST is enabled, TST will not run)
         te_sst_user_dataset_list = ['SQuAD1', 'TruthfulQA', 'NarrativeQA'], # ['SQuAD1', 'TruthfulQA', 'NarrativeQA']
         te_sst_fill_dataset_list = ['SQuAD1', 'TruthfulQA', 'NarrativeQA'], # ['SQuAD1', 'TruthfulQA', 'NarrativeQA']
-        te_sst_userfill_type_list = ['hm', 'hh', 'mm'], # ['hm', 'hh', 'mm']
+        te_sst_userfill_type_list = ['hm', 'mh', 'hh', 'mm'], # ['hm', 'mh', 'hh', 'mm']
         te_sst_true_ratio_list = [1], # [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
         te_sst_strong_list = [False],
     )
@@ -419,7 +454,7 @@ def get_args():
     # Settings Parameters
     parser.add_argument('--model_dir', type=str, default='./models', help='Directory of the trained models.')
     parser.add_argument('--device', '-dv', type=str, default='auto', help='Device to run the model on.')
-    parser.add_argument('--debug', default=False, action='store_true', help='Whether to run in debug mode.')
+    parser.add_argument('--debug', default=False, action='store_true', help='Enable debug mode, which supresses file creations.')
     
     # Batch Test Parameters
     parser.add_argument('--batch_test', default=False, action='store_true', help='Whether to run in batch test mode. If yes, the following parameters will be ignored.')
@@ -476,7 +511,7 @@ def main():
     if args['batch_test']:
         perform_batch_test(args=args, logger=logger)
     else:
-        _, _, _, _ = get_test_result(args=args, logger=logger)
+        _, _, _ = get_test_result(args=args, logger=logger)
         
 if __name__ == "__main__":
     main()
