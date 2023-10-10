@@ -90,7 +90,7 @@ DKTST-for-MTD
 ### Train
 
 To train a new model, use `train.py` with the following arguments.
-```bash
+```
 usage: train.py [-h] [--model_dir str] [--device str] [--debug] [--continue_model str] [--hidden_multi int] [--n_epoch int] --datasets str [--dataset_llm str] [--dataset_train_ratio float] [--s1_type str] [--s2_type str] [--shuffle] [--learning_rate float]
                 [--sample_size_train int] [--eval_interval int] [--save_interval int] [--seed int] [--dtype str] [--perm_cnt int] [--sig_lvl float] [--sample_size_test int] [--sample_count_test int]
 
@@ -147,7 +147,7 @@ The trained models are (by default) saved to its own folder in `/models`.
 ### Test
 
 To test a trained model, use `test.py` with the following arguments.
-```bash
+```
 usage: test.py [-h] [--model_dir str] [--device str] [--debug] [--batch_test] [--model_name str] [--chkpnt_epoch int] [--dataset_llm str] [--dataset_train_ratio float] [--shuffle] [--perm_cnt int] [--sig_lvl float]
                [--sample_size int] [--sample_count int] [--seed int] [--test_type str] [--tst_datasets str] [--tst_s1_type str] [--tst_s2_type str] [--sst_user_dataset str] [--sst_fill_dataset str] [--sst_user_type str]
                [--sst_fill_type str] [--sst_true_ratio float] [--sst_strong]
@@ -211,7 +211,7 @@ Test results are (by default) saved to a `test_<start_time_stamp>.log` file and 
 Analysis can be performed after a test `.csv` result file has been created.
 
 To run an analysis and print the result in tabular format, use `analysis.py` with the following arguments.
-```bash
+```
 usage: analysis.py [-h] --csv_files str --analysis_name {tabular_seed,tabular_shuffle,tabular_linearSize,tabular_sampleSize,tabular_permutationCount,tabular_LLM,tabular_SSTTrueDataRatio,tabular_SSTDataset,graphic_seed,graphic_shuffle,graphic_linearSize,graphic_sampleSize,graphic_sampleSizeAcrossModel,graphic_permutationCount,graphic_permutationCountTiming,graphic_SSTTrueDataRatio} [--test_log_path str] [--output_folder str] [--debug]
 
 optional arguments:
@@ -236,7 +236,7 @@ The analysis results are (by default) saved to `/analysis_logs`.
 
 Training graphs are saved to a `events.out.tfevents.*` file in the model's folder, which is a `Tensorboard` log file and can be viewed using `tensorboard --log_dir <model_folder>`.
 If instead a `.png` file format is required, the script at `/scripts/save_training_graph_to_png.py` can be used with the following arguments.
-```bash
+```
 usage: save_training_graph_to_png.py [-h] [--model_dir MODEL_DIR] [--model_names MODEL_NAMES [MODEL_NAMES ...]]
 
 optional arguments:
