@@ -314,7 +314,7 @@ dependencies:
       - gdown==4.4.0
       - gensim==4.3.0
       - hyperopt==0.2.7
-      - importlib-metadata==6.6.0
+      - importlib-metadata
       - janome==0.4.2
       - jieba==0.42.1
       - konoha==4.6.5
