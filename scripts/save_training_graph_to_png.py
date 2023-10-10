@@ -67,8 +67,8 @@ def get_args():
     # Setup parser
     parser = ArgumentParser()
     # Per Run Parameters
-    parser.add_argument('--model_dir', type=str, default='./models')
-    parser.add_argument('--model_names', nargs='+', type=str)
+    parser.add_argument('--model_dir', type=str, default='./models', help='Directory where models are saved.')
+    parser.add_argument('--model_names', nargs='+', type=str, help='Name of the model folders to save plots for.')
 
     args = parser.parse_args()
     return vars(args) # return dict

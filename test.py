@@ -457,7 +457,7 @@ def get_args():
     parser.add_argument('--debug', default=False, action='store_true', help='Enable debug mode, which supresses file creations.')
     
     # Batch Test Parameters
-    parser.add_argument('--batch_test', default=False, action='store_true', help='Whether to run in batch test mode. If yes, the following parameters will be ignored.')
+    parser.add_argument('--batch_test', default=False, action='store_true', help='Whether to run in batch test mode. If yes, the following parameters will be ignored, and parameters to test are specified in the perform_batch_test() function.')
     
     # Model Parameters
     parser.add_argument('--model_name', type=str, help='Name of the model to test.')

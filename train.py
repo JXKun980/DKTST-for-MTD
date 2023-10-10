@@ -140,15 +140,15 @@ def get_args():
     # Continue Parameters
     parser.add_argument('--continue_model', type=str, default=None, help='Name of the model folder to continue training. If set, all parameters below are ignored.')
     # Training parameters
-    parser.add_argument('--hidden_multi', type=int, default=5, help='Hidden layer size multiple. Hidden dimension = In dimension * Multiple')
-    parser.add_argument('--n_epoch', '-e', type=int, default=8000, help='Number of epochs to train')
-    parser.add_argument('--datasets', '-d', nargs='+', type=str, help='One or more datasets to split train set from. If more than one used, they are merged together into a single dataset.')
+    parser.add_argument('--hidden_multi', type=int, default=3, help='Hidden layer size multiple. Hidden dimension = In dimension * Multiple.')
+    parser.add_argument('--n_epoch', '-e', type=int, default=3000, help='Number of epochs to train')
+    parser.add_argument('--datasets', '-d', nargs='+', type=str, required=True, help='One or more datasets to split train set from. If more than one used, they are merged together into a single dataset.')
     parser.add_argument('--dataset_llm', '-dl', type=str, default='ChatGPT', help='The LLM the machine generated text is extracted from.') # ChatGPT, BloomZ, ChatGLM, Dolly, ChatGPT-turbo, GPT4, StableLM
     parser.add_argument('--dataset_train_ratio', '-dtrr', type=float, default=0.8, help='Ratio of train set to the total dataset')
     parser.add_argument('--s1_type', type=str, default='human', help='Type of data (human or machine) for the first sample set')
     parser.add_argument('--s2_type', type=str, default='machine', help='Type of data (human or machine) for the second sample set') 
     parser.add_argument('--shuffle', default=False, action='store_true', help='Enable to shuffle the test set within each distribution to break pair-dependency')
-    parser.add_argument('--learning_rate', '-lr', type=float, default=0.001, help='Initial learning rate for Adam')
+    parser.add_argument('--learning_rate', '-lr', type=float, default=0.0005, help='Initial learning rate for Adam')
     parser.add_argument('--sample_size_train', '-sstr', type=int, default=20, help='Number of samples in each sample set (for the two distributions) for training')
     parser.add_argument('--eval_interval', type=int, default=100, help='Number of epochs between subsequent test for training and validation power')
     parser.add_argument('--save_interval', type=int, default=500, help='Number of epochs between subsequent model checkpoint saves')
@@ -170,23 +170,25 @@ def get_args():
 def main():
     args = get_args()
     
-    args['hidden_multi'] = 3
-    args['n_epoch'] = 3000
-    args['datasets'] = ['TruthfulQA', 'SQuAD1', 'NarrativeQA']
-    args['dataset_llm'] = 'ChatGPT'
-    args['shuffle'] = False
-    args['learning_rate'] = 0.00005
-    args['sample_size_train'] = 20
-    args['seed'] = 1103
-    args['sample_count_test'] = 20
-    start_training(args)   
+    # New Training example (if you want to call the file directly without specifying arguments)
+    # args['hidden_multi'] = 3
+    # args['n_epoch'] = 3000
+    # args['datasets'] = ['TruthfulQA', 'SQuAD1', 'NarrativeQA']
+    # args['dataset_llm'] = 'ChatGPT'
+    # args['shuffle'] = False
+    # args['learning_rate'] = 0.00005
+    # args['sample_size_train'] = 20
+    # args['seed'] = 1103
+    # args['sample_count_test'] = 20
+    # start_training(args)   
     
-    
-    # Continue Training Template
+    # Continue Training example (if you want to call the file directly without specifying arguments)
     # args['continue_model'] = 'TruthfulQA_ChatGPT_hm_nos_3_10000_20_1107_2e-04_20230916200738'
     # start_training(args)
     # args['continue_model'] = None
+    # start_training(args)  
     
+    start_training(args)   
     
 if __name__ == "__main__":
     main()
