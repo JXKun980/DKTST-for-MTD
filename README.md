@@ -1,6 +1,6 @@
 # DKTST-for-MTD
 
-An adaption of the Deep-kernel Two-sample-test framework for the task of machine text detection, currently only working on distinguishing between human written texts and Chat-GPT written texts.
+An adaption of the Deep-kernel Two-sample-test framework for the task of machine-generated text detection, which is experimentally tested to exhibit good performance across 3 curated datasets sourced from [MGTBench](https://github.com/xinleihe/MGTBench): SQuAD1, TruthfulQA, NarrativeQA.
 
 ## Manual Installation on Linux
 
@@ -131,7 +131,7 @@ optional arguments:
                         Number of testing sample pairs to generate for validation power testing (default: 50)
 ```
 
-Example
+**Example**
 
 ```bash
 python train.py --datasets TruthfulQA
@@ -193,7 +193,7 @@ optional arguments:
   --sst_strong          Whether to enable strong mode for the single sample test (requiring two different sets) (default: False)
 ```
 
-Example
+**Example**
 
 Given a trained model at `/models/TruthfulQA_ChatGPT_hm_nos_3_3000_20_1103_5e-05_20230919072909/`, rename the checkpoint `model_ep_1500.pth` to `model_best_ep_1500.pth`, so running `test.py` do not need you to specify the epoch of the checkpoint to test every time.
 ```bash
@@ -226,7 +226,7 @@ optional arguments:
   --debug               Enable debug model to supress log file creation. (default: False)
 ```
 
-Example
+**Example**
 
 Given a test result CSV file at `/test_logs/test_20231009082130.csv`, use:
 ```bash
@@ -250,7 +250,7 @@ optional arguments:
                         Name of the model folders to save plots for.
 ```
 
-Example
+**Example**
 
 Given a trained model at `/models/TruthfulQA_ChatGPT_hm_nos_3_3000_20_1103_5e-05_20230919072909/`
 ```bash
