@@ -1,6 +1,6 @@
 # DKTST-for-MTD
 
-An adaption of the Deep-kernel Two-sample-test framework for the task of machine-generated text detection, which is experimentally tested to exhibit good performance across 3 curated datasets sourced from [MGTBench](https://github.com/xinleihe/MGTBench): SQuAD1, TruthfulQA, NarrativeQA.
+An adaption of the Deep-kernel Two-sample-test framework for the task of machine-generated text detection, which is experimentally varified to exhibit good performance across 3 curated datasets sourced from [MGTBench](https://github.com/xinleihe/MGTBench): SQuAD1, TruthfulQA, NarrativeQA.
 
 ## Manual Installation on Linux
 
