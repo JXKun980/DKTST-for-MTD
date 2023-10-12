@@ -142,7 +142,7 @@ def get_args():
     # Training parameters
     parser.add_argument('--hidden_multi', type=int, default=3, help='Hidden layer size multiple. Hidden dimension = In dimension * Multiple.')
     parser.add_argument('--n_epoch', '-e', type=int, default=3000, help='Number of epochs to train')
-    parser.add_argument('--datasets', '-d', nargs='+', type=str, required=True, help='One or more datasets to split train set from. If more than one used, they are merged together into a single dataset.')
+    parser.add_argument('--datasets', '-d', nargs='+', type=str, help='One or more datasets to split train set from. If more than one used, they are merged together into a single dataset.')
     parser.add_argument('--dataset_llm', '-dl', type=str, default='ChatGPT', help='The LLM the machine generated text is extracted from.') # ChatGPT, BloomZ, ChatGLM, Dolly, ChatGPT-turbo, GPT4, StableLM
     parser.add_argument('--dataset_train_ratio', '-dtrr', type=float, default=0.8, help='Ratio of train set to the total dataset')
     parser.add_argument('--s1_type', type=str, default='human', help='Type of data (human or machine) for the first sample set')
@@ -175,7 +175,7 @@ def main():
     # args['n_epoch'] = 3000
     # args['datasets'] = ['TruthfulQA', 'SQuAD1', 'NarrativeQA']
     # args['dataset_llm'] = 'ChatGPT'
-    # args['shuffle'] = False
+    # args['shuffle'] = True
     # args['learning_rate'] = 0.00005
     # args['sample_size_train'] = 20
     # args['seed'] = 1103

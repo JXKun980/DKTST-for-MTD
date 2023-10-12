@@ -301,7 +301,7 @@ class TabularAnalysisSSTDataset(TabularAnalysis):
     
     def __init__(self, 
                  df: pd.DataFrame,):
-        super().__init__(df, DATASETS)
+        super().__init__(df)
         self.user_datasets = self.df.te_sst_user_dataset.unique()
         self.fill_datasets = self.df.te_sst_fill_dataset.unique()
     
@@ -674,8 +674,8 @@ ARG_TO_ANALYSIS = {
 def get_args():
     parser = ArgumentParser()
     
-    parser.add_argument('--csv_files', type=str, nargs='+', required=True, help='CSV files to analyze, files are merged into one for analysis.')
-    parser.add_argument('--analysis_name', type=str, choices=ARG_TO_ANALYSIS.keys(), required=True, help='Analysis to run.')
+    parser.add_argument('--csv_files', type=str, nargs='+', help='CSV files to analyze, files are merged into one for analysis.')
+    parser.add_argument('--analysis_name', type=str, choices=ARG_TO_ANALYSIS.keys(), help='Analysis to run.')
     
     parser.add_argument('--test_log_path', type=str, default='./test_logs/', required=False, help='Directory to test logs.')
     parser.add_argument('--output_folder', type=str, default='./analysis_logs/', required=False, help='Directory to output analysis logs.')
