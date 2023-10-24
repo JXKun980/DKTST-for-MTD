@@ -72,18 +72,18 @@ DKTST-for-MTD
 └── util.py
 ```
 
-- `/datasets`: Dataset files
-- `/models`: Trained models, each in its own folder
-- `/analysis_logs`: Output files from `analysis.py`
-- `/test_logs`: Output files from `test.py`
-- `environment.yml`: Conda environment specification file
-- `/scripts`: Utility scripts, call from the root directory of the project
-- `/external`: Externally sourced scripts (not written by me)
-- `model.py`: Model definition
-- `test.py`: Testing script, required trained model, output by default saved to `/test_logs`, call `python test.py --help` for more details.
-- `train.py`: Training script, models by default saved to `/models`, call `python train.py --help` for more details.
-- `analysis.py`: Analysis script, required `.csv` results from the `test.py` script, either print the test results in a condensed table format, or a graphic format. Output by default saved to `/analysis_logs`.
-- `util.py`: Shared script
+- `/datasets`: Dataset files.
+- `/models`: Trained models, each in its own folder.
+- `/analysis_logs`: Output files from `analysis.py`.
+- `/test_logs`: Output files from `test.py`.
+- `/scripts`: Utility scripts, call from the root directory of the project.
+- `/external`: Externally sourced scripts (not written as part of this project).
+- `environment.yml`: Conda environment specification file.
+- `model.py`: Model definition.
+- `test.py`: Testing script. A trained model is required before running this script. The outputs by default are saved to `/test_logs`. Call `python test.py --help` for more details.
+- `train.py`: Training script. The trained models by default are saved to `/models` folder. Call `python train.py --help` for more details.
+- `analysis.py`: Analysis script. This script requires the output CSV files from the `test.py` script to be created. This script either print the test results in a condensed table format, or a graphic format. Output by default saved to `/analysis_logs`.
+- `util.py`: Shared script containing utility functions and class definitions.
 
 ## Usage
 
