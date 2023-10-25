@@ -29,11 +29,18 @@ class TabularAnalysis(abc.ABC):
                 ('Type 1', 'Type 2'), 
                 ('Mean', 'Std.')
             ),
-            names = ('Database', 'Test Type', 'Test Power')
+            names = ('Database', 'Test Type', 'Rejection Rate')
+        )
+        self.row_indicies_without_std = pd.MultiIndex.from_product(
+            iterables = (
+                ['Aggregated']+DATASETS,
+                ('Type 1', 'Type 2'), 
+            ),
+            names = ('Database', 'Test Type')
         )
         
     def aggregate_numpy_all_datasets(self, analysis_fun):
-        '''Get analysis result for each database and a result for the aggregated data, combine the results horizontally.'''
+        '''Get analysis result for each database and a result for the aggregated data, combine the results vertically.'''
         # Get result for each database, and then concatenate together in axis 1.
         result = None
         for ds in self.df.te_tst_datasets.unique():
@@ -199,6 +206,73 @@ class TabularAnalysisSampleSize(TabularAnalysis):
                     ))
         return df_result
     
+    
+class TabularAnalysisSampleSize(TabularAnalysis):
+    description = 'Analysis for sample size during testing'
+    
+    def __init__(self, 
+                 df: pd.DataFrame,
+                 sample_sizes: 'list[int]' = None):
+        super().__init__(df)
+        self.sample_sizes = self.df.te_sample_size.unique() if sample_sizes is None else sample_sizes
+        
+    def get_numpy_single_dataset(self, df: pd.DataFrame):
+        result = np.zeros((4, len(self.sample_sizes)))
+        for i, ss in enumerate(self.sample_sizes):
+            for j, s1s2 in enumerate(S1S2):
+                df_result = df[
+                        (df.te_sample_size == ss) 
+                        & (df.te_tst_s1s2_type.map(lambda x: x in s1s2))
+                    ].test_power
+                result[2*j, i] = df_result.mean()
+                result[2*j+1, i] = df_result.std()
+        return result
+    
+    def get_df(self):
+        result = self.get_numpy()
+        df_result = pd.DataFrame(result,
+                    index = self.row_indices,
+                    columns = pd.Index(
+                        data = self.sample_sizes,
+                        name = 'Test Sample Size',
+                    ))
+        return df_result
+    
+class TabularAnalysisLLMSampleSize(TabularAnalysis):
+    description = 'Analysis for sample size during testing'
+    
+    def __init__(self, 
+                 df: pd.DataFrame,
+                 sample_sizes: 'list[int]' = None):
+        super().__init__(df)
+        self.sample_sizes = self.df.te_sample_size.unique() if sample_sizes is None else sample_sizes
+        self.llms = self.df.te_data_llm.unique()
+        
+    def get_numpy_single_dataset(self, df: pd.DataFrame):
+        result = np.zeros((4, len(self.sample_sizes)*len(self.llms)))
+        for i, ss in enumerate(self.sample_sizes):
+            for j, llm in enumerate(self.llms):
+                for k, s1s2 in enumerate(S1S2):
+                    df_result = df[
+                            (df.te_sample_size == ss) 
+                            & (df.te_data_llm == llm)
+                            & (df.te_tst_s1s2_type.map(lambda x: x in s1s2))
+                        ].test_power
+                    result[2*k, j*len(self.sample_sizes)+i] = df_result.mean()
+                    result[2*k+1, j*len(self.sample_sizes)+i] = df_result.std()
+        return result
+    
+    def get_df(self):
+        result = self.get_numpy()
+        df_result = pd.DataFrame(result,
+                    index = self.row_indices,
+                    columns = pd.MultiIndex.from_product(
+                        iterables = (self.llms, self.sample_sizes),
+                        names = ('LLM', 'Test Sample Size'),
+                    ))
+        return df_result
+    
+    
 class TabularAnalysisPermutationCount(TabularAnalysis):
     description = 'Analysis for permutation count during testing'
     
@@ -262,6 +336,7 @@ class TabularAnalysisLLM(TabularAnalysis):
         return df_result
     
 class TabularAnalysisSSTTrueDataRatio(TabularAnalysis):
+    '''Requirements: SST user dataset is the same as SST fill dataset'''
     description = 'Analysis for single sample test true data ratio'
 
     def __init__(self, 
@@ -283,13 +358,23 @@ class TabularAnalysisSSTTrueDataRatio(TabularAnalysis):
                 result[j, i] = df_result.mean()
         return result
     
+    def aggregate_numpy_all_datasets(self, analysis_fun):
+        '''Get analysis result for each database and a result for the aggregated data, combine the results vertically.'''
+        # Get result for each database, and then concatenate together in axis 1.
+        result = None
+        for ds in self.df.te_sst_user_dataset.unique():
+            result_ds = analysis_fun(self.df[self.df.te_sst_user_dataset == ds])
+            result = np.concatenate((result, result_ds), axis=0) if result is not None else result_ds
+            
+        # Get result for the aggregated database
+        aggregated_result = analysis_fun(self.df)
+        result = np.concatenate((aggregated_result, result), axis=0)
+        return result
+    
     def get_df(self):
         result = self.get_numpy()
         df_result = pd.DataFrame(result,
-                    index = pd.Index(
-                        data = ('Type 1', 'Type 2'),
-                        name = 'Test Type',
-                    ),
+                    index = self.row_indicies_without_std,
                     columns = pd.Index(
                         data = self.true_data_ratios,
                         name = 'True data ratio',
@@ -332,11 +417,56 @@ class TabularAnalysisSSTDataset(TabularAnalysis):
                             ('Type 1', 'Type 2'), 
                             ('Mean', 'Std.')
                         ),
-                        names=('User Dataset', 'Test Type', 'Test Power')
+                        names=('User Dataset', 'Test Type', 'Rejection Rate')
                     ),
                     columns = pd.Index(
                         data=self.fill_datasets,
                         name='Fill Dataset',
+                    ))
+        return df_result
+
+class TabularAnalysisSSTOptimalLLM(TabularAnalysis):
+    '''Requirements: Single true data ratio, SST user dataset is the same as SST fill dataset'''
+    description = 'Analysis for single sample test on different LLMs with an optimal (single) True data ratio'
+
+    def __init__(self, 
+                 df: pd.DataFrame): 
+        super().__init__(df)
+        assert len(self.df.te_sst_true_ratio) != 1, "This analysis only works for results with a single true data ratio"
+        self.LLMs = self.df.te_data_llm.unique()
+        self.s1s2s = self.df.te_sst_userfill_type.unique()
+        
+    def get_numpy_single_dataset(self, df: pd.DataFrame):
+        result = np.zeros((2, len(self.LLMs)))
+        for i, llm in enumerate(self.LLMs):
+            for j, s1s2 in enumerate(S1S2):
+                df_result = df[
+                        (df.te_data_llm == llm) 
+                        & (df.te_sst_userfill_type.map(lambda x: x in s1s2))
+                    ].test_power
+                result[j, i] = df_result.mean()
+        return result
+    
+    def aggregate_numpy_all_datasets(self, analysis_fun):
+        '''Get analysis result for each database and a result for the aggregated data, combine the results vertically.'''
+        # Get result for each database, and then concatenate together in axis 1.
+        result = None
+        for ds in self.df.te_sst_user_dataset.unique():
+            result_ds = analysis_fun(self.df[self.df.te_sst_user_dataset == ds])
+            result = np.concatenate((result, result_ds), axis=0) if result is not None else result_ds
+            
+        # Get result for the aggregated database
+        aggregated_result = analysis_fun(self.df)
+        result = np.concatenate((aggregated_result, result), axis=0)
+        return result
+    
+    def get_df(self):
+        result = self.get_numpy()
+        df_result = pd.DataFrame(result,
+                    index = self.row_indicies_without_std,
+                    columns = pd.Index(
+                        data = self.LLMs,
+                        name = 'LLM',
                     ))
         return df_result
 
@@ -401,7 +531,7 @@ class GraphAnalysisShuffle(GraphAnalysis):
             # Style
             g.despine(left=True)
             g.set_xlabels('(Train data shuffled, Test data shuffled)')
-            g.set_ylabels(f'Type {test_type} Test Power (Mean)')
+            g.set_ylabels(f'Type-{"I" if test_type == 1 else "II"} Rejection Rate (Mean)')
             g.legend.set_title('Test Dataset')
             plt.show()           
 
@@ -439,7 +569,7 @@ class GraphAnalysisLinearSize(GraphAnalysis):
             # Style
             g.despine(left=True)
             g.set_xlabels('Model Linear Layer Size Multiple')
-            g.set_ylabels(f'Type {test_type} Test Power (Mean)')
+            g.set_ylabels(f'Type-{"I" if test_type == 1 else "II"} Rejection Rate (Mean)')
             g.legend.set_title('Test Dataset')
             plt.show()    
 
@@ -473,7 +603,7 @@ class GraphAnalysisPermCnt(GraphAnalysis):
             # Style
             g.despine(left=True)
             g.set_xlabels('Two-Sample Test Permutation Count')
-            g.set_ylabels(f'Type {test_type} Test Power (Mean)')
+            g.set_ylabels(f'Type-{"I" if test_type == 1 else "II"} Rejection Rate (Mean)')
             g.legend.set_title('Test Dataset')
             plt.show()         
 
@@ -527,7 +657,7 @@ class GraphAnalysisSampleSize(GraphAnalysis):
             # Style
             g.despine(left=True)
             g.set_xlabels('Two-Sample Test Sample Set Size')
-            g.set_ylabels(f'Type {test_type} Test Power (Mean)')
+            g.set_ylabels(f'Type-{"I" if test_type == 1 else "II"} Rejection Rate (Mean)')
             g.legend.set_title('Test Dataset')
             plt.show()    
             
@@ -570,7 +700,7 @@ class GraphAnalysisSampleSizeAcrossModel(GraphAnalysis):
                 # Style
                 g.despine(left=True)
                 g.set_xlabels('Two-Sample Test Sample Set Size')
-                g.set_ylabels(f'Type {test_type} Test Power (Mean)')
+                g.set_ylabels(f'Type-{"I" if test_type == 1 else "II"} Rejection Rate (Mean)')
                 g.legend.set_title('Model')
                 plt.show()  
 
@@ -605,7 +735,7 @@ class GraphAnalysisSeed(GraphAnalysis):
             # Style
             g.despine(left=True)
             g.set_xlabels('Training Seed')
-            g.set_ylabels(f'Type {test_type} Test Power (Mean)')
+            g.set_ylabels(f'Type-{"I" if test_type == 1 else "II"} Rejection Rate (Mean)')
             g.legend.set_title('Test Dataset')
             plt.show()  
                 
@@ -642,7 +772,7 @@ class GraphAnalysisSSTTrueRatio(GraphAnalysis):
             # Style
             g.despine(left=True)
             g.set_xlabels('Single-Sample Test True User Data Ratio')
-            g.set_ylabels(f'Type {test_type} Test Power (Mean)')
+            g.set_ylabels(f'Type-{"I" if test_type == 1 else "II"} Rejection Rate (Mean)')
             g.legend.set_title('Test Dataset')
             plt.show()  
 
@@ -659,8 +789,10 @@ ARG_TO_ANALYSIS = {
     'tabular_sampleSize': TabularAnalysisSampleSize,
     'tabular_permutationCount': TabularAnalysisPermutationCount,
     'tabular_LLM': TabularAnalysisLLM,
+    'tabular_LLMSampleSize': TabularAnalysisLLMSampleSize,
     'tabular_SSTTrueDataRatio': TabularAnalysisSSTTrueDataRatio,
     'tabular_SSTDataset': TabularAnalysisSSTDataset,
+    'tabular_SSTOptimalLLM': TabularAnalysisSSTOptimalLLM,
     'graphic_seed': GraphAnalysisSeed,
     'graphic_shuffle': GraphAnalysisShuffle,
     'graphic_linearSize': GraphAnalysisLinearSize,
