@@ -197,15 +197,13 @@ class DKTST_for_MTD:
         data_te_same = data_te.copy_with_single_type(use_s1=True)
         
         # Training loop
-        best_power = 0
-        best_chkpnt = 0
         self.latent.train()
         for t in tqdm(range(start_epoch, total_epoch), initial=start_epoch, total=total_epoch, desc="Training Progress"): # Epoch Loop, +1 here to end at a whole numbered epoch
             J_stars_batch = np.zeros([len(data_tr_cls)])
             mmd_values_batch = np.zeros([len(data_tr_cls)])
             mmd_stds_batch = np.zeros([len(data_tr_cls)])
             
-            for s_idx, (s1_cls, s2_cls) in enumerate(data_tr_cls): # Batche Loop
+            for s_idx, (s1_cls, s2_cls) in enumerate(data_tr_cls): # Batch Loop
                 # Get batch data
                 s1_cls = torch.squeeze(s1_cls, 0)
                 s2_cls = torch.squeeze(s2_cls, 0)
@@ -279,9 +277,6 @@ class DKTST_for_MTD:
             
         # Save deep kernel neural network
         self.save(save_folder=save_folder, epoch=t)
-        
-        # Indicate best model
-        self.logger.info(f"Best model at checkpoint {best_chkpnt}")
         
         return J_stars_epoch, mmd_values_epoch, mmd_stds_epoch
 

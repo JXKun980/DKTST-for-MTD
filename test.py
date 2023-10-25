@@ -166,6 +166,7 @@ def perform_batch_test_aux(
                        
                        te_sst_user_dataset_list,
                        te_sst_fill_dataset_list,
+                       te_sst_user_same_as_fill_dataset,
                        te_sst_userfill_type_list,
                        te_sst_true_ratio_list,
                        te_sst_strong_list,
@@ -198,13 +199,14 @@ def perform_batch_test_aux(
             te_tst_s1s2_type_list: List of types of data the model is tested on (TST only)
             te_sst_user_dataset_list: List of user datasets the model is tested on (SST only)
             te_sst_fill_dataset_list: List of fill datasets the model is tested on (SST only)
+            te_sst_user_same_as_fill_dataset: Whether user dataset is same as fill dataset, "True" will ignore the fill dataset list (SST only)
             te_sst_userfill_type_list: List of types of data the model is tested on (SST only)
             te_sst_true_ratio_list: List of true ratio of the model is tested on (SST only)
             te_sst_strong_list: List of whether the model is tested on strong mode (SST only)
         '''
         logger.info("=========== Starting batch test ===========")
         
-        # Use dummy parameters for one of the tests as it is not used
+        # Use dummy parameters for some conditions
         if te_test_type == 'TST':
             te_sst_user_dataset_list = [None]
             te_sst_fill_dataset_list = [None]
@@ -214,6 +216,9 @@ def perform_batch_test_aux(
         elif te_test_type == 'SST':
             te_tst_datasets_list = [[]]
             te_tst_s1s2_type_list = [None]
+            
+        if te_sst_user_same_as_fill_dataset:
+            te_sst_fill_dataset_list = [None]
         
         # Calculate number of tests
         test_count = (
@@ -349,7 +354,7 @@ def perform_batch_test_aux(
                     new_args['tst_s2_type'] = te_tst_s2_type
                     
                     new_args['sst_user_dataset'] = te_sst_user_dataset
-                    new_args['sst_fill_dataset'] = te_sst_fill_dataset
+                    new_args['sst_fill_dataset'] = te_sst_fill_dataset if not te_sst_user_same_as_fill_dataset else te_sst_user_dataset
                     new_args['sst_user_type'] = te_sst_user_type
                     new_args['sst_fill_type'] = te_sst_fill_type
                     new_args['sst_true_ratio'] = te_sst_true_ratio
@@ -382,6 +387,7 @@ def perform_batch_test_aux(
                             te_tst_s1s2_type=te_tst_s1s2_type,
                             te_sst_user_dataset=te_sst_user_dataset,
                             te_sst_fill_dataset=te_sst_fill_dataset,
+                            te_sst_user_same_as_fill_dataset=te_sst_user_same_as_fill_dataset,
                             te_sst_userfill_type=te_sst_userfill_type,
                             te_sst_true_ratio=te_sst_true_ratio,
                             te_sst_strong=te_sst_strong,
@@ -398,7 +404,9 @@ def perform_batch_test_aux(
     
     
 def perform_batch_test(args, logger):
-    '''Perform batch test with the following parameters and save results to file. The script arguments are overwritten by the following parameters.'''
+    '''Perform batch test with the cross-product of the following parameters and save results to file. The script arguments are overwritten by the following parameters.
+       See perform_batch_test_aux() for descriptions of the parameters.
+    '''
     batch_start_time_str = util.get_current_time_str()
     result_df = perform_batch_test_aux(
         args=args, 
@@ -406,19 +414,19 @@ def perform_batch_test(args, logger):
         
         # Models' parameters, used to load the trained model.
         # Default assume the use of the latest trained model if multiple ones exist for a configuration
-        tr_datasets_list=[['TruthfulQA', 'SQuAD1', 'NarrativeQA']], # Note each item is another list of datasets, represnting a merged dataset
+        tr_datasets_list=[['SQuAD1']], # Note each item is another list of datasets, represnting a merged dataset
         tr_dataset_llm_list=['ChatGPT'],
         tr_s1s2_type_list = ['hm'],
-        tr_shuffle_list = [True],
+        tr_shuffle_list = [False],
         tr_linear_size_list = [3], # [3, 5]
-        tr_epoch_list = [3000],
+        tr_epoch_list = [5000],
         tr_sample_size_list = [20],
         tr_seed_list = [1103],
         tr_lr_list = [5e-05], # [5e-05, 1e-03]
         tr_chkpnt_ep_list = [None], # [500,1000,2000,3000,4000,5000,6000,7000,8000,9000]
         
         # Shared testing parameters
-        te_dataset_llm_list = ['ChatGPT'], # ['ChatGPT', 'ChatGLM', 'Dolly', 'ChatGPT-turbo', 'GPT4', 'StableLM']
+        te_dataset_llm_list = ['ChatGPT', 'ChatGLM', 'Dolly', 'ChatGPT-turbo', 'GPT4', 'StableLM'],
         te_shuffle_list = [False], # [True, False]
         te_sample_size_list = [10], # [20, 10, 5, 4, 3]
         te_sample_cnt_list = [20],
@@ -435,8 +443,9 @@ def perform_batch_test(args, logger):
         # Single Sample Test only parameters (If SST is enabled, TST will not run)
         te_sst_user_dataset_list = ['SQuAD1', 'TruthfulQA', 'NarrativeQA'], # ['SQuAD1', 'TruthfulQA', 'NarrativeQA']
         te_sst_fill_dataset_list = ['SQuAD1', 'TruthfulQA', 'NarrativeQA'], # ['SQuAD1', 'TruthfulQA', 'NarrativeQA']
+        te_sst_user_same_as_fill_dataset = True,
         te_sst_userfill_type_list = ['hm', 'hh', 'mm'], # ['hm', 'mh', 'hh', 'mm']
-        te_sst_true_ratio_list = [1], # [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        te_sst_true_ratio_list = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2],
         te_sst_strong_list = [False],
     )
     if not args['debug']: # Save the result if not in debug mode
